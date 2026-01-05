@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex justify-content-between align-items-center">
+    <h2>Invoice {{ invoice.invoice_number }}</h2>
+    <div>
+      <a href="{% url 'generate_pdf' invoice.pk %}" class="btn btn-outline-secondary">Download PDF</a>
+      <a href="{% url 'invoice_edit' invoice.pk %}" class="btn btn-primary">Edit</a>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-body">
+      <div class="header clearfix" style="margin-bottom:24px;border-bottom:1px solid #e6e6e6;padding-bottom:12px;">
+        <div class="company-info" style="float:left;width:55%;">
+          {% if invoice.business_logo %}
+            <img src="{{ invoice.business_logo.url }}" alt="{{ invoice.business_name }}" style="max-width:150px;max-height:80px;object-fit:contain;" />
+          {% endif %}
+          {% if invoice.business_name %}<h2 style="margin:6px 0 6px 0;">{{ invoice.business_name }}</h2>{% endif %}
+          <p style="margin:0;">
+            {% if invoice.business_address %}{{ invoice.business_address }}<br>{% endif %}
+            {% if invoice.business_email %}{{ invoice.business_email }}<br>{% endif %}
+            {% if invoice.business_phone %}{{ invoice.business_phone }}{% endif %}
+          </p>
+        </div>
+
+        <div class="invoice-info" style="float:right;width:40%;text-align:right;">
+          <h1 style="margin:0;">INVOICE</h1>
+          <p style="margin:6px 0 0 0;"><small>Created: {% if invoice.created_at %}{{ invoice.created_at }}{% else %}{{ now }}{% endif %}</small></p>
+          <p style="margin:8px 0 0 0;">
+            <strong>Invoice #:</strong> {{ invoice.invoice_number }}<br>
+            <strong>Date:</strong> {{ invoice.invoice_date }}<br>
+            <strong>Due Date:</strong> {{ invoice.due_date }}<br>
+            <strong>Status:</strong> {{ invoice.get_status_display }}
+          </p>
+        </div>
+      </div>
+
+      <div style="clear:both;"></div>
+
+      <div class="client-info" style="margin:20px 0 16px;">
+        <h5>Bill To</h5>
+        <p>
+          <strong>{% if invoice.client_name %}{{ invoice.client_name }}{% else %}{{ invoice.client.name }}{% endif %}</strong><br>
+          {% if invoice.client_email %}{{ invoice.client_email }}{% else %}{{ invoice.client.email }}{% endif %}<br>
+          {% if invoice.client_phone %}{{ invoice.client_phone }}{% else %}{{ invoice.client.phone }}{% endif %}
+        </p>
+        <p>
+          {% if invoice.client_address %}
+            {{ invoice.client_address|linebreaksbr }}
+          {% else %}
+            {% if invoice.client.address %}
+              {{ invoice.client.address|linebreaksbr }}
+            {% else %}
+              {{ invoice.client.street }}{% if invoice.client.city %}, {{ invoice.client.city }}{% endif %}{% if invoice.client.state %}, {{ invoice.client.state }}{% endif %} {% if invoice.client.zip_code %}{{ invoice.client.zip_code }}{% endif %}{% if invoice.client.country %}, {{ invoice.client.country }}{% endif %}
+            {% endif %}
+          {% endif %}
+        </p>
+      </div>
+      <p class="text-muted small">Created: {{ invoice.created_at }}</p>
+
+      <h5>Items</h5>
+      <table class="table">
+        <thead>
+          <tr><th>Description</th><th>Qty</th><th>Price</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+          {% for item in invoice.items.all %}
+          <tr>
+            <td>{{ item.description }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.unit_price }}</td>
+            <td>{{ item.line_total }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="text-end">
+        <p>Subtotal: {{ invoice.subtotal }}</p>
+        <p>Tax: {{ invoice.tax_amount }}</p>
+        <p>Discount: {{ invoice.discount_amount }}</p>
+        <h4>Total: {{ invoice.total_amount }}</h4>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

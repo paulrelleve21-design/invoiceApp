@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card text-center">
+            <div class="card-body p-5">
+                <i class="fas fa-check-circle text-success" style="font-size: 4rem;"></i>
+                <h2 class="mt-3">Invoice Created Successfully!</h2>
+                <p class="lead">Invoice #{{ invoice.invoice_number }}</p>
+                
+                <div class="d-flex justify-content-center gap-2 mt-4">
+                    <a href="{% url 'invoice_detail' invoice.pk %}" class="btn btn-primary">
+                        <i class="fas fa-eye me-2"></i>View Invoice
+                    </a>
+                    <a href="{% url 'generate_pdf' invoice.pk %}" class="btn btn-success" target="_blank">
+                        <i class="fas fa-file-pdf me-2"></i>Download PDF
+                    </a>
+                    <a href="{% url 'invoice_create' %}" class="btn btn-secondary">
+                        <i class="fas fa-plus me-2"></i>Create Another
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Ad Placement #5: After invoice creation confirmation -->
+        <div class="ad-banner mt-4" onclick="trackAdClick('ad-confirm-001', 'confirmation', 'https://example.com/payment-integration', {{ invoice.pk }})">
+            <h4><i class="fas fa-credit-card me-2"></i>Accept Online Payments!</h4>
+            <p class="mb-0">Integrate payment gateways and get paid instantly. Try it now!</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-5">
+  <h1>Dashboard</h1>
+  <p>Welcome, {{ request.user.username }}!</p>
+
+  <div class="row mt-4">
+    <div class="col-md-3">
+      <div class="card p-3">
+        <h6>Total Revenue</h6>
+        <h3>{{ total_revenue|default:"0.00" }}</h3>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card p-3">
+        <h6>Total Invoices</h6>
+        <h3>{{ total_invoices }}</h3>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card p-3">
+        <h6>Paid</h6>
+        <h3>{{ paid_count }}</h3>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card p-3">
+        <h6>Pending</h6>
+        <h3>{{ pending_count }}</h3>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card p-3">
+        <h6>Overdue</h6>
+        <h3>{{ overdue_count }}</h3>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-4">
+    <div class="col-md-6">
+      <h5>Recent Invoices</h5>
+      <table class="table table-sm">
+        <thead><tr><th>#</th><th>Client</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for inv in recent_invoices %}
+            <tr>
+              <td>{{ inv.invoice_number }}</td>
+              <td>{{ inv.client.name }}</td>
+              <td>{{ inv.invoice_date }}</td>
+              <td>{{ inv.total_amount }}</td>
+              <td>{{ inv.get_status_display }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5">No invoices yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="col-md-6">
+      <h5>Top Clients</h5>
+      <table class="table table-sm">
+        <thead><tr><th>Client</th><th>Invoices</th><th>Total</th></tr></thead>
+        <tbody>
+          {% for c in top_clients %}
+            <tr>
+              <td>{{ c.name }}</td>
+              <td>{{ c.invoices_count|default:0 }}</td>
+              <td>{{ c.total_invoiced|default:"0.00" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="3">No clients yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

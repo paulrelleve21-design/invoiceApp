@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+  <h2>Business Profile</h2>
+  {% if businesses %}
+    <div class="mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0">Existing Business Profiles</h5>
+        <div>
+          <button id="bp-add-profile" type="button" class="btn btn-sm btn-primary">Add Profile</button>
+        </div>
+      </div>
+      <div class="list-group mb-2" style="max-height:420px; overflow:auto; padding-right:6px;">
+        <table class="table table-striped mb-0" style="table-layout:fixed; width:100%;">
+          <colgroup>
+            <col style="width:40%;">
+            <col style="width:30%;">
+            <col style="width:20%;">
+            <col style="width:10%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Business</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in businesses %}
+            <tr class="list-group-item align-middle" data-pk="{{ b.pk }}">
+              <td><strong>{{ b.business_name }}</strong></td>
+              <td class="text-muted">{{ b.email }}</td>
+              <td class="text-muted">{{ b.phone }}</td>
+              <td class="text-end">
+                <a href="{% url 'business_profile_setup' %}?id={{ b.pk }}" class="btn btn-sm btn-outline-primary me-2">Edit</a>
+                <form method="post" action="{% url 'business_profile_setup' %}" style="display:inline;">
+                  {% csrf_token %}
+                  <input type="hidden" name="delete_business_pk" value="{{ b.pk }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+
+  <style>
+    /* Two-column responsive form for medium+ screens */
+    .two-col-form .mb-3 { width:100%; box-sizing: border-box; }
+    @media(min-width:768px){
+      .two-col-form .mb-3 { width:50%; float:left; padding-right:12px; }
+      .two-col-form .mb-3.full-width { width:100%; clear:both; padding-right:0; }
+    }
+    /* Make list-group-item behave like table rows inside .table so cells align with thead */
+    .table .list-group-item { display: table-row; }
+    .table .list-group-item > td { padding-top: .75rem; padding-bottom: .75rem; vertical-align: middle; }
+    /* Prevent the default .list-group-item background/padding from breaking the table layout */
+    .table .list-group-item { background: transparent; }
+  </style>
+
+  <form method="post" enctype="multipart/form-data" class="two-col-form">
+    {% csrf_token %}
+    <div id="bp-form-fields" style="display:none">
+      {% for field in form %}
+        <div class="mb-3">
+          {{ field.label_tag }}
+          {{ field }}
+          {{ field.errors }}
+        </div>
+      {% endfor %}
+      <div id="business-logo-preview-container" style="margin-top:8px; display:none;">
+        <label class="form-label">Current Logo Preview</label>
+        <div>
+          <img id="business-logo-preview" src="" alt="Business logo" style="max-width:160px; max-height:100px; border-radius:4px;" />
+        </div>
+      </div>
+      <div style="clear:both"></div>
+      <button type="submit" class="btn btn-primary btn-save">Save</button>
+    </div>
+    <script>
+      (function(){
+        try{
+          const form = document.querySelector('form[enctype="multipart/form-data"]');
+          if (!form) return;
+          const fileInput = form.querySelector('input[type=file]');
+          const previewContainer = document.getElementById('business-logo-preview-container');
+          const previewImg = document.getElementById('business-logo-preview');
+          if (fileInput && previewImg) {
+            fileInput.addEventListener('change', function(e){
+              const f = e.target.files && e.target.files[0];
+              if (!f) { if (previewContainer) previewContainer.style.display='none'; previewImg.src=''; return; }
+              const url = URL.createObjectURL(f);
+              previewImg.src = url; if (previewContainer) previewContainer.style.display='block';
+            });
+            // If the server already provided an existing logo (e.g., form initial), try to show it
+            const existing = form.querySelector('img');
+          }
+        }catch(e){console.warn(e)}
+      })();
+    </script>
+    <script>
+      // Toggle Add Profile fields
+      (function(){
+        try{
+          const addBtn = document.getElementById('bp-add-profile');
+          const fields = document.getElementById('bp-form-fields');
+          if (!addBtn || !fields) return;
+          addBtn.addEventListener('click', function(){
+            const showing = fields.style.display !== 'none';
+            fields.style.display = showing ? 'none' : '';
+            if (!showing) {
+              const first = fields.querySelector('input,textarea,select');
+              if (first) first.focus();
+            }
+          });
+        }catch(e){console.warn(e)}
+      })();
+    </script>
+  </form>
+</div>
+{% endblock %}

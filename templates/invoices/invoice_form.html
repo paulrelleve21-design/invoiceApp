@@ -1,0 +1,1708 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-9">
+        <h1>{{ action }} Invoice</h1>
+        
+                <form method="post" id="invoice-form" enctype="multipart/form-data" action="{% if action == 'Create' %}{% url 'invoice_create' %}{% else %}{% if form.instance.pk %}{% url 'invoice_edit' form.instance.pk %}{% else %}{% url 'invoice_create' %}{% endif %}{% endif %}">
+                        {% csrf_token %}
+                        <style>
+                            /* Two-column responsive form used inside Invoice Details */
+                            .two-col-form .mb-3 { width:100%; box-sizing: border-box; }
+                            @media(min-width:768px){
+                                .two-col-form .mb-3 { width:50%; float:left; padding-right:12px; }
+                                .two-col-form .mb-3.full-width { width:100%; clear:both; padding-right:0; }
+                            }
+
+                            /* Invoice items table tweaks - improved alignment */
+                            #items-table { width:100%; border-collapse: separate; border-spacing:0; }
+                            #items-table td, #items-table th { vertical-align: middle; padding: .45rem .6rem; }
+                            #items-table td.delete-cell { text-align: center; width:5%; white-space:nowrap; }
+
+                            /* Inputs sizing and box model */
+                            #items-table input[name$='-description'] { width:100%; box-sizing:border-box; margin:0; }
+                            #items-table input[name$='-quantity'],
+                            #items-table input[name$='-unit_price'] { width:110px; box-sizing:border-box; text-align:right; }
+
+                            /* Make line total align visually under the Total header */
+                            #items-table .line-total { text-align: right; font-weight:600; min-width:80px; display:block; width:100%; box-sizing:border-box; }
+
+                            /* Ensure header and total cells share the same alignment and padding */
+                            #items-table th.total-header, #items-table td.total-cell { text-align: right; padding-right: .6rem; }
+                            #items-table td.total-cell .line-total { display:block; width:100%; text-align:right; }
+
+                            /* Header checkbox positioned to the right */
+                            #items-table thead th { vertical-align: middle; text-align:left; }
+                            th.unit-price-header { text-align: right; }
+                            th.total-header { text-align: right; padding-right:8px; }
+                            /* Position Delete label left and checkbox anchored to far right (flex layout) */
+                            th.delete-header { display:flex; align-items:center; justify-content:space-between; gap:2px; padding-right:25px; min-width:72px; }
+                            th.delete-header span { display:inline-block; font-weight:600; }
+                            #items-table thead th .select-all-checkbox { position:static; transform: scale(1.12); margin:0; }
+
+                            /* Ensure Delete column has a sensible minimum width so checkbox doesn't overlap label */
+                            #items-table td.delete-cell, #items-table th.delete-header { width:8%; min-width:90px; }
+
+                            /* Ensure bootstrap form-controls inside table cells don't add extra margins */
+                            #items-table td .form-control { margin:0; height:calc(1.5em + .5rem + 2px); padding:.25rem .5rem; }
+
+                            /* Center delete checkbox vertically/horizontally in body cells */
+                            #items-table td.delete-cell { text-align:center; }
+                            #items-table td.delete-cell input[type="checkbox"] { transform:scale(1.12); margin:auto; display:block; }
+
+                            /* Ensure Unit Price and Total body cells are right aligned */
+                            #items-table td:nth-child(3) { text-align:right; }
+                            #items-table td.total-cell { text-align:right; }
+
+                            /* Small screens: reduce input width to avoid wrapping */
+                            @media(max-width:767px){
+                                #items-table input[name$='-quantity'], #items-table input[name$='-unit_price'] { width:80px; }
+                            }
+
+                            /* Row padding consistency */
+                            .item-row td { padding-top:.35rem; padding-bottom:.35rem; }
+
+                            /* Align totals display to the right and ensure minimal width */
+                            #subtotal-display, #tax-display, #discount-display, #total-display { min-width:100px; display:inline-block; text-align:right; }
+                        </style>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Invoice #</label>
+                    {{ form.invoice_number }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Invoice Date</label>
+                    {{ form.invoice_date }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Due Date</label>
+                    {{ form.due_date }}
+                </div>
+            </div>
+            {# Ensure currency is posted even if not shown: default to form value or USD #}
+            <input type="hidden" name="currency" id="id_currency" value="{% if form.currency.value %}{{ form.currency.value }}{% elif form.initial.currency %}{{ form.initial.currency }}{% else %}USD{% endif %}">
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Invoice Details</h5>
+                </div>
+                <div class="card-body two-col-form">
+                    <div class="row">
+                        <!-- Left: Bill To area (client select at top) -->
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Client *</label>
+                                {{ form.client }}
+                                <input type="text" id="id_client_create" class="form-control mt-2" placeholder="Or type a new client name" style="display:none;" />
+                            </div>
+                            <div class="mb-3" id="client-edit-fields">
+                                <label class="form-label">Bill To (editable)</label>
+                                <div class="row">
+                                    <div class="col-12 mb-2">{{ form.client_name }}</div>
+                                    <div class="col-12 mb-2">{{ form.client_email }}</div>
+                                    <div class="col-12 mb-2">{{ form.client_phone }}</div>
+                                    <div class="col-12">{{ form.client_address }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Right: Business Details (business select at top) -->
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Business Profile</label>
+                                <div class="d-flex">
+                                    <select id="id_business_select" name="business" class="form-select me-2">
+                                        <option value="">-- Select Business --</option>
+                                        {% if businesses %}
+                                            {% for b in businesses %}
+                                                <option value="{{ b.pk }}" data-name="{{ b.business_name|escapejs }}" data-email="{{ b.email|default:''|escapejs }}" data-phone="{{ b.phone|default:''|escapejs }}" data-address="{{ b.address|default:''|escapejs }}" data-logo="{% if b.logo %}{{ b.logo.url }}{% endif %}" {% if business_initial.id and business_initial.id|stringformat:"s" == b.pk|stringformat:"s" %}selected{% endif %}>{{ b.business_name }}</option>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </select>
+                                    <input type="text" id="id_business_create" class="form-control mt-2" placeholder="Or type a new business name" style="display:none; width:220px;" />
+                                    
+                                </div>
+                            </div>
+                                <div class="mb-3 full-width" id="business-edit-fields" style="display:block;">
+                                <label class="form-label">Business Details (editable)</label>
+                                <input type="hidden" id="id_business_id" name="business_id" value="{{ business_initial.id|default:'' }}">
+                                <div class="d-flex align-items-start gap-3">
+                                    <div style="flex:0 0 120px; text-align:center;">
+                                        <div style="font-size:12px; color:#333; margin-bottom:6px;">Photo</div>
+                                        <img id="business-left-preview" src="" alt="Business photo" style="max-width:120px; max-height:120px; display:none; border-radius:4px;" />
+                                    </div>
+                                    <div style="flex:1 1 auto;">
+                                        <div class="mb-2"><input class="form-control" id="id_business_name_text" name="business_name" placeholder="Business name" value="{{ business_initial.name|default:invoice.business_name|default:'' }}"></div>
+                                        <div class="mb-2"><input class="form-control" id="id_business_email_text" name="business_email" placeholder="Business email" value="{{ business_initial.email|default:invoice.business_email|default:'' }}"></div>
+                                        <div class="mb-2"><input class="form-control" id="id_business_phone_text" name="business_phone" placeholder="Business phone" value="{{ business_initial.phone|default:invoice.business_phone|default:'' }}"></div>
+                                        <div class="mb-2"><textarea class="form-control" id="id_business_address_text" name="business_address" placeholder="Business address">{{ business_initial.address|default:invoice.business_address|default:'' }}</textarea></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <small class="text-muted">Change business logo via <a href="{% url 'business_profile_setup' %}">Edit Business Profile</a>.</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Status</label>
+                                {{ form.status }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Tax Rate (%)</label>
+                                {{ form.tax_rate }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Discount Amount</label>
+                                {{ form.discount_amount }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Invoice Items -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Invoice Items</h5>
+                </div>
+                <div class="card-body">
+                    {{ formset.management_form }}
+                    
+                    <table class="table" id="items-table">
+                        <colgroup>
+                            <col style="width:50%">
+                            <col style="width:15%">
+                            <col style="width:15%">
+                            <col style="width:15%">
+                            <col style="width:5%">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th style="width: 50%">Description</th>
+                                <th style="width: 15%">Quantity</th>
+                                <th class="unit-price-header" style="width: 15%">Unit Price</th>
+                                <th class="total-header" style="width: 15%">Total</th>
+                                <th class="delete-header" style="width: 15%"><span>Delete</span>
+                                    <input type="checkbox" id="select-all-delete" class="select-all-checkbox" title="Select all for deletion" aria-label="Select all for deletion" />
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="items-tbody">
+                            {% for form in formset %}
+                            <tr class="item-row">
+                                {{ form.id }}
+                                <td>{{ form.description }}</td>
+                                <td>{{ form.quantity }}</td>
+                                <td>{{ form.unit_price }}</td>
+                                <td><span class="line-total">$0.00</span></td>
+                                <td class="delete-cell">{{ form.DELETE }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <!-- Hidden empty form template for adding rows -->
+                        <tbody id="empty-form-template" style="display:none">
+                            <tr class="item-row">
+                                {{ formset.empty_form.id }}
+                                <td>{{ formset.empty_form.description }}</td>
+                                <td>{{ formset.empty_form.quantity }}</td>
+                                <td>{{ formset.empty_form.unit_price }}</td>
+                                <td><span class="line-total">$0.00</span></td>
+                                <td class="delete-cell">{{ formset.empty_form.DELETE }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <button type="button" class="btn btn-secondary" onclick="addItem()">
+                        <i class="fas fa-plus me-2"></i>Add Item
+                    </button>
+                    <button type="button" id="delete-selected-btn" class="btn btn-danger ms-2" title="Delete selected items"> 
+                        <i class="fas fa-trash-alt me-2"></i>Delete Selected
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Totals -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row justify-content-end">
+                        <div class="col-md-4">
+                            <div class="d-flex justify-content-between mb-2">
+                                <strong>Subtotal:</strong>
+                                <span id="subtotal-display">$0.00</span>
+                            </div>
+                            <div class="d-flex justify-content-between mb-2">
+                                <strong>Tax:</strong>
+                                <span id="tax-display">$0.00</span>
+                            </div>
+                            <div class="d-flex justify-content-between mb-2">
+                                <strong>Discount:</strong>
+                                <span id="discount-display">$0.00</span>
+                            </div>
+                            <hr>
+                            <div class="d-flex justify-content-between">
+                                <h5>Total:</h5>
+                                <h5 id="total-display">$0.00</h5>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Additional Info -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Payment Terms</label>
+                        {{ form.payment_terms }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        {{ form.notes }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Business Profile photo input moved into Invoice Details (see above) -->
+            
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-save me-2"></i>Save Invoice
+            </button>
+            <button type="button" class="btn btn-outline-secondary ms-2" id="live-pdf-preview-btn">Download PDF</button>
+            <!-- Download button removed from page; use modal Download instead -->
+            <a href="{% url 'invoice_list' %}" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+    
+    <!-- Sidebar: live preview and quick actions -->
+    <div class="col-md-3">
+        <div class="card mb-3">
+                <div class="card-body">
+                    <h5>Live Preview</h5>
+                    <div id="invoice-preview">
+                        <div class="d-flex justify-content-between">
+                            <strong id="preview-inv-number">{{ form.invoice_number.value|default:'' }}</strong>
+                            <small id="preview-timestamp" class="text-muted"></small>
+                        </div>
+                        <div class="mt-2 d-flex align-items-center">
+                            <img id="preview-business-logo" src="" alt="Business logo preview" style="max-width:140px; max-height:80px; display:none; border-radius:4px; margin-right:12px;" />
+                            <div id="preview-business-info" style="display:inline-block;">
+                                <div id="preview-business-name" style="font-weight:600;color:#333;"></div>
+                                <div id="preview-business-address" class="text-muted small"></div>
+                            </div>
+                        </div>
+                        <div id="preview-client" class="text-muted">Client: <span></span></div>
+                        <div class="mt-2">
+                            <div>Subtotal: <span id="preview-subtotal">$0.00</span></div>
+                            <div>Tax: <span id="preview-tax">$0.00</span></div>
+                            <div>Discount: <span id="preview-discount">$0.00</span></div>
+                            <div><strong>Total: <span id="preview-total">$0.00</span></strong></div>
+                        </div>
+                    </div>
+                </div>
+        </div>
+
+        <div class="ad-banner mb-3" onclick="trackAdClick('ad-sidebar-001', 'sidebar', 'https://example.com/invoicing-tips')">
+            <h5><i class="fas fa-lightbulb me-2"></i>Pro Tips</h5>
+            <p>Learn how to create professional invoices that get paid faster!</p>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-body">
+                <h6>Quick Actions</h6>
+                <a href="{% url 'client_create' %}" class="btn btn-sm btn-outline-primary w-100 mb-2">
+                    <i class="fas fa-plus me-2"></i>Add Client
+                </a>
+                        <a href="{% url 'business_profile_setup' %}" class="btn btn-sm btn-outline-primary w-100 mb-2">
+                            <i class="fas fa-briefcase me-2"></i>Edit Business Profile
+                        </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Preview Modal (used for live preview and HTML/PDF display) -->
+<div class="modal fade" id="invoice-preview-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Invoice Preview</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="invoice-preview-modal-body" style="min-height:60vh; position: relative;">
+                                            <!-- preview content inserted here -->
+                                            <style>
+                                                #invoice-preview-modal-body { position: relative; }
+                                            </style>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="modal-download-btn">Download PDF</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+ 
+    {% endblock %}
+
+    {% block extra_js %}
+<script>
+    // Safe DOM helpers
+    function getVal(id) {
+        const el = document.getElementById(id);
+        return el ? el.value : '';
+    }
+    function getCsrf() {
+        const t = document.querySelector('input[name=csrfmiddlewaretoken]');
+        return t ? t.value : '';
+    }
+
+    // Real-time calculations
+    function calculateTotals() {
+        let subtotal = 0;
+
+        // Iterate item rows and be resilient about input class/name differences.
+        document.querySelectorAll('.item-row').forEach(row => {
+            // Prefer explicit classes but fall back to name-based selectors if classes are missing
+            let qtyInput = row.querySelector('.item-quantity');
+            if (!qtyInput) qtyInput = row.querySelector('input[name$="-quantity"], input[name*="quantity"]');
+            let priceInput = row.querySelector('.item-price');
+            if (!priceInput) priceInput = row.querySelector('input[name$="-unit_price"], input[name*="unit_price"], input[name$="-price"], input[name*="price"]');
+
+            const totalSpan = row.querySelector('.line-total');
+            const deleteCheckbox = row.querySelector('input[name$="-DELETE"]');
+
+            const isDeleted = deleteCheckbox ? deleteCheckbox.checked : false;
+
+            if (qtyInput && priceInput && !isDeleted) {
+                // tolerate commas and whitespace
+                const rawQty = (qtyInput.value || '').toString().replace(/,/g,'').trim();
+                const rawPrice = (priceInput.value || '').toString().replace(/,/g,'').trim();
+                const qty = parseFloat(rawQty) || 0;
+                const price = parseFloat(rawPrice) || 0;
+                const lineTotal = qty * price;
+
+                if (totalSpan) totalSpan.textContent = '$' + lineTotal.toFixed(2);
+                subtotal += lineTotal;
+            }
+        });
+
+        // Read tax and discount robustly (support input or select)
+        const taxEl = document.getElementById('id_tax_rate') || document.querySelector('[name="tax_rate"]');
+        const discEl = document.getElementById('id_discount_amount') || document.querySelector('[name="discount_amount"]');
+        const taxRate = parseFloat((taxEl && (taxEl.value || '')).toString().replace(/,/g,'').trim()) || 0;
+        const discount = parseFloat((discEl && (discEl.value || '')).toString().replace(/,/g,'').trim()) || 0;
+
+        const taxAmount = (subtotal * taxRate) / 100;
+        const total = subtotal + taxAmount - discount;
+
+        // Update visible totals
+        const subEl = document.getElementById('subtotal-display'); if (subEl) subEl.textContent = '$' + subtotal.toFixed(2);
+        const taxDisplayEl = document.getElementById('tax-display'); if (taxDisplayEl) taxDisplayEl.textContent = '$' + taxAmount.toFixed(2);
+        const discDisplayEl = document.getElementById('discount-display'); if (discDisplayEl) discDisplayEl.textContent = '$' + discount.toFixed(2);
+        const totalEl = document.getElementById('total-display'); if (totalEl) totalEl.textContent = '$' + total.toFixed(2);
+
+        // update preview client text if present
+        const previewClient = document.querySelector('#id_client option:checked');
+        if (previewClient) {
+            const el = document.querySelector('#preview-client span');
+            if (el) el.textContent = previewClient.textContent.trim();
+        }
+        const pSub = document.getElementById('preview-subtotal'); if (pSub) pSub.textContent = '$' + subtotal.toFixed(2);
+        const pTax = document.getElementById('preview-tax'); if (pTax) pTax.textContent = '$' + taxAmount.toFixed(2);
+        const pDisc = document.getElementById('preview-discount'); if (pDisc) pDisc.textContent = '$' + discount.toFixed(2);
+        const pTotal = document.getElementById('preview-total'); if (pTotal) pTotal.textContent = '$' + total.toFixed(2);
+
+        // update preview timestamp
+        const ts = new Date();
+        const tsEl = document.getElementById('preview-timestamp');
+        if (tsEl) tsEl.textContent = ts.toLocaleString();
+
+        // Rebuild the mini preview to mirror the PDF layout
+        try {
+            const miniData = buildPreviewDataSync();
+            renderMiniPreview(miniData);
+        } catch (e) { console.warn('renderMiniPreview failed', e); }
+    }
+    
+    // Add event listeners
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.item-quantity, .item-price').forEach(input => {
+            input.addEventListener('input', calculateTotals);
+        });
+        
+        const taxEl = document.getElementById('id_tax_rate');
+        if (taxEl) { taxEl.addEventListener('input', calculateTotals); taxEl.addEventListener('change', calculateTotals); }
+        const discEl = document.getElementById('id_discount_amount');
+        if (discEl) { discEl.addEventListener('input', calculateTotals); discEl.addEventListener('change', calculateTotals); }
+
+        // Delegated listeners on the items tbody so any input/change in rows triggers recalculation
+        const itemsTbody = document.getElementById('items-tbody');
+        if (itemsTbody) {
+            itemsTbody.addEventListener('input', function(e){
+                // only react to inputs that potentially affect totals (quantity, price, delete, description)
+                const t = e.target;
+                if (!t) return;
+                const n = (t.name || '').toLowerCase();
+                if (n.indexOf('quantity') !== -1 || n.indexOf('unit_price') !== -1 || n.indexOf('price') !== -1 || n.indexOf('-delete') !== -1 || n.indexOf('description') !== -1) {
+                    calculateTotals();
+                }
+            });
+            itemsTbody.addEventListener('change', function(){ calculateTotals(); });
+        }
+        
+    // Ensure item inputs are wired (add classes, listeners) so totals update correctly
+    try { wireItemInputs(); } catch(e) { console.warn('wireItemInputs failed', e); }
+    calculateTotals();
+        // populate client/address preview on load (edit case)
+        try {
+            const clientSelect = document.getElementById('id_client');
+            if (clientSelect) updatePreviewClientById(clientSelect.value || '');
+        } catch (e) {
+            // ignore
+        }
+
+        // Attach preview/download button handler
+        const liveBtn = document.getElementById('live-pdf-preview-btn');
+        if (liveBtn) liveBtn.addEventListener('click', previewOrDownload);
+
+        // Business photo upload removed from invoice flow; edits should be made
+        // via the Business Profile page. No client-side file handling here.
+        // on load, wire business select preview population
+        try {
+            const bizSel = document.getElementById('id_business_select');
+            if (bizSel) updatePreviewBusinessById(bizSel.value || '');
+            if (bizSel) bizSel.addEventListener('change', function(){ updatePreviewBusinessById(this.value); });
+        } catch (e) {}
+
+        // wire business editable inputs to update live preview
+        try {
+            const bName = document.getElementById('id_business_name_text');
+            const bAddr = document.getElementById('id_business_address_text');
+            const bEmail = document.getElementById('id_business_email_text');
+            const bPhone = document.getElementById('id_business_phone_text');
+            function refreshBizPreview(){
+                const nameEl = document.getElementById('preview-business-name');
+                const addrEl = document.getElementById('preview-business-address');
+                if (nameEl) nameEl.textContent = (bName && bName.value) ? bName.value : '';
+                if (addrEl) addrEl.textContent = (bAddr && bAddr.value) ? bAddr.value : '';
+            }
+            [bName,bAddr,bEmail,bPhone].forEach(i=>{ if (i) i.addEventListener('input', refreshBizPreview); });
+        } catch (e) {}
+        // wire client editable inputs: placeholders + live-preview sync
+        try {
+            const cName = document.getElementById('id_client_name');
+            const cEmail = document.getElementById('id_client_email');
+            const cPhone = document.getElementById('id_client_phone');
+            const cAddr = document.getElementById('id_client_address');
+            function refreshClientPreview(){
+                try {
+                    const el = document.querySelector('#preview-client span');
+                    const sel = document.getElementById('id_client');
+                    const selText = (sel && sel.options && sel.selectedIndex >= 0) ? (sel.options[sel.selectedIndex].text || '') : '';
+                    const name = (cName && cName.value) ? cName.value : selText || 'Client';
+                    const addr = (cAddr && cAddr.value) ? cAddr.value : '';
+                    if (el) el.textContent = name + (addr ? ' — ' + addr : '');
+                    try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) { /* ignore */ }
+                } catch (e) { /* ignore */ }
+            }
+            if (cName) { cName.placeholder = 'Client name'; cName.addEventListener('input', refreshClientPreview); }
+            if (cEmail) { cEmail.placeholder = 'client@example.com'; /* email doesn't affect preview text but kept for UX */ }
+            if (cPhone) { cPhone.placeholder = 'Phone (optional)'; cPhone.addEventListener('input', refreshClientPreview); }
+            if (cAddr) { cAddr.placeholder = 'Street, City, State, ZIP'; cAddr.addEventListener('input', refreshClientPreview); }
+            // set initial preview value from any existing field values
+            refreshClientPreview();
+        } catch (e) {}
+    });
+
+        // Helper: serialize current invoice form into a preview data object (may fetch client info)
+        async function serializePreviewData() {
+            const data = {};
+            data.invoice_number = getVal('id_invoice_number');
+            data.invoice_date = getVal('id_invoice_date');
+            data.due_date = getVal('id_due_date');
+            data.tax_rate = getVal('id_tax_rate');
+            data.discount_amount = getVal('id_discount_amount');
+            data.status = getVal('id_status');
+            data.payment_terms = getVal('id_payment_terms');
+            data.notes = getVal('id_notes');
+            data.currency = getVal('id_currency') || 'USD';
+
+            const clientSelect = document.getElementById('id_client');
+            const clientId = clientSelect ? clientSelect.value : null;
+            data.client = { name: clientSelect ? clientSelect.options[clientSelect.selectedIndex].text : 'Client' };
+            if (clientId) {
+                try {
+                    const r = await fetch(`/clients/${clientId}/json/`);
+                    if (r.ok) data.client = await r.json();
+                } catch (err) {
+                    // ignore
+                }
+            }
+
+            // include client snapshot editable fields (override fetched data when present)
+            try {
+                const cName = (document.getElementById('id_client_name') || {}).value || '';
+                const cEmail = (document.getElementById('id_client_email') || {}).value || '';
+                const cPhone = (document.getElementById('id_client_phone') || {}).value || '';
+                const cAddr = (document.getElementById('id_client_address') || {}).value || '';
+                if (!data.client) data.client = {};
+                if (cName) data.client.name = cName;
+                if (cEmail) data.client.email = cEmail;
+                if (cPhone) data.client.phone = cPhone;
+                if (cAddr) data.client.address = cAddr;
+            } catch (e) {}
+            data.items = [];
+
+            // include business snapshot fields (editable) so preview/pdf reflects current inputs
+            try {
+                const bizSel = document.getElementById('id_business_select');
+                const bId = bizSel ? bizSel.value : '';
+                const bName = (document.getElementById('id_business_name_text') || {}).value || '';
+                const bEmail = (document.getElementById('id_business_email_text') || {}).value || '';
+                const bPhone = (document.getElementById('id_business_phone_text') || {}).value || '';
+                const bAddr = (document.getElementById('id_business_address_text') || {}).value || '';
+                data.business = { id: bId, business_name: bName, email: bEmail, phone: bPhone, address: bAddr };
+
+                // Business photo upload removed from invoice flow; do not include files in preview payload.
+            } catch (e) {}
+
+            data.items = [];
+            document.querySelectorAll('#items-tbody tr.item-row').forEach(row => {
+                const desc = row.querySelector('[name$="-description"]');
+                const qty = row.querySelector('input[name$="-quantity"]');
+                const price = row.querySelector('input[name$="-unit_price"]');
+                const del = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+                if (desc && qty && price) {
+                    if (del && del.checked) return;
+                    data.items.push({
+                        description: desc.value,
+                        quantity: parseFloat(qty.value) || 0,
+                        unit_price: parseFloat(price.value) || 0
+                    });
+                }
+            });
+
+            return data;
+        }
+
+    // Synchronous lightweight data builder for instant live preview rendering
+    function buildPreviewDataSync() {
+        const data = {};
+        data.invoice_number = getVal('id_invoice_number') || 'PREVIEW';
+        data.invoice_date = getVal('id_invoice_date') || '';
+        data.due_date = getVal('id_due_date') || '';
+        data.status = (getVal('id_status') || '').replace(/(^|_)([a-z])/g, function(m,p,c){ return c ? c.toUpperCase() : ''; }) || 'Draft';
+        data.payment_terms = getVal('id_payment_terms') || '';
+        data.notes = getVal('id_notes') || '';
+        data.currency = getVal('id_currency') || 'USD';
+
+        // client snapshot
+        const clientSelect = document.getElementById('id_client');
+        let clientName = '';
+        if (document.getElementById('id_client_name') && document.getElementById('id_client_name').value) clientName = document.getElementById('id_client_name').value;
+        else if (clientSelect && clientSelect.options && clientSelect.selectedIndex >= 0) clientName = clientSelect.options[clientSelect.selectedIndex].text;
+        data.client = { name: clientName || 'Client', email: (document.getElementById('id_client_email')||{}).value||'', phone: (document.getElementById('id_client_phone')||{}).value||'', address: (document.getElementById('id_client_address')||{}).value||'' };
+
+        // business snapshot
+        const biz = {};
+        biz.business_name = (document.getElementById('id_business_name_text')||{}).value || (document.getElementById('id_business_select') ? (document.getElementById('id_business_select').options[document.getElementById('id_business_select').selectedIndex]||{}).text : '') || '';
+        biz.email = (document.getElementById('id_business_email_text')||{}).value || '';
+        biz.phone = (document.getElementById('id_business_phone_text')||{}).value || '';
+        biz.address = (document.getElementById('id_business_address_text')||{}).value || '';
+        const liveLogo = document.getElementById('preview-business-logo');
+        const leftPreview = document.getElementById('business-left-preview');
+        // Prefer left-side preview (uploaded or selected), fall back to sidebar logo
+        if (leftPreview && leftPreview.src && leftPreview.style.display !== 'none') {
+            biz.logo = leftPreview.src;
+        } else if (liveLogo && liveLogo.src && liveLogo.style.display !== 'none') {
+            biz.logo = liveLogo.src;
+        } else {
+            biz.logo = '';
+        }
+        data.business = biz;
+
+        // items
+        data.items = [];
+        let subtotal = 0;
+        document.querySelectorAll('#items-tbody tr.item-row').forEach(row => {
+            const desc = row.querySelector('[name$="-description"]');
+            const qty = row.querySelector('input[name$="-quantity"]');
+            const price = row.querySelector('input[name$="-unit_price"]');
+            const del = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+            if (desc && qty && price) {
+                if (del && del.checked) return;
+                const rawQ = (qty.value || '').toString().replace(/,/g,'').trim();
+                const rawP = (price.value || '').toString().replace(/,/g,'').trim();
+                const q = parseFloat(rawQ) || 0;
+                const p = parseFloat(rawP) || 0;
+                const lt = q * p;
+                data.items.push({ description: desc.value || '', quantity: q, unit_price: p, line_total: lt });
+                subtotal += lt;
+            }
+        });
+        data.subtotal = subtotal;
+        const taxRate = parseFloat((getVal('id_tax_rate')||'').toString().replace(/,/g,'').trim()) || 0;
+        data.tax_rate = taxRate;
+        data.tax_amount = subtotal * (taxRate/100);
+        data.discount_amount = parseFloat((getVal('id_discount_amount')||'').toString().replace(/,/g,'').trim()) || 0;
+        data.total_amount = subtotal + data.tax_amount - data.discount_amount;
+
+        return data;
+    }
+
+    // Render a compact HTML preview that mirrors `invoice_pdf.html` layout
+    function renderMiniPreview(d) {
+        try {
+            const container = document.getElementById('invoice-preview');
+            if (!container) return;
+            const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            let html = '';
+            html += '<div class="d-flex justify-content-between"><div style="width:55%">';
+            if (d.business && d.business.logo) html += '<img src="'+esc(d.business.logo)+'" style="max-width:120px; max-height:60px; display:inline-block; margin-right:8px;" />';
+            html += '<div style="font-weight:600;">'+esc(d.business.business_name || '')+'</div>';
+            if (d.business && (d.business.address || d.business.email || d.business.phone)) {
+                html += '<div style="font-size:12px;color:#666">'+esc(d.business.address || '') + (d.business.email ? '<br/>'+esc(d.business.email) : '') + (d.business.phone ? '<br/>'+esc(d.business.phone) : '') +'</div>';
+            }
+            html += '</div>';
+            html += '<div style="text-align:right; width:40%">';
+            html += '<div style="font-weight:700; font-size:1.05rem">INVOICE</div>';
+            html += '<div style="font-size:12px">Invoice #: <span class="preview-invoice-number">'+esc(d.invoice_number)+'</span></div>';
+            html += '<div style="font-size:12px">Date: '+esc(d.invoice_date)+'</div>';
+            html += '<div style="font-size:12px">Due: '+esc(d.due_date)+'</div>';
+            html += '<div style="font-size:12px">Status: '+esc(d.status)+'</div>';
+            html += '</div></div>';
+
+            html += '<hr style="margin:8px 0"/>';
+            html += '<div style="margin-top:6px">';
+            html += '<div style="font-weight:600">Bill To:</div>';
+            html += '<div style="font-size:13px">'+esc(d.client.name || '')+'</div>';
+            if (d.client.address) html += '<div style="font-size:12px;color:#666">'+esc(d.client.address)+'</div>';
+            html += '</div>';
+
+            // items
+            html += '<table style="width:100%; border-collapse:collapse; margin-top:8px">';
+            html += '<thead><tr><th style="text-align:left">Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Total</th></tr></thead>';
+            html += '<tbody>';
+            if (d.items && d.items.length) {
+                d.items.forEach(it => {
+                    html += '<tr>';
+                    html += '<td style="padding:6px 8px">'+esc(it.description)+'</td>';
+                    html += '<td style="padding:6px 8px; text-align:right">'+esc(it.quantity)+'</td>';
+                    html += '<td style="padding:6px 8px; text-align:right">'+esc(d.currency || '')+' '+esc(Number(it.unit_price).toFixed(2))+'</td>';
+                    html += '<td style="padding:6px 8px; text-align:right">'+esc(d.currency || '')+' '+esc(Number(it.line_total).toFixed(2))+'</td>';
+                    html += '</tr>';
+                });
+            } else {
+                html += '<tr><td colspan="4" style="text-align:center;padding:12px;color:#888">No items</td></tr>';
+            }
+            html += '</tbody></table>';
+
+            // totals
+            html += '<div style="margin-top:8px; text-align:right">';
+            html += '<div>Subtotal: <strong>'+esc(d.currency || '')+' '+Number(d.subtotal||0).toFixed(2)+'</strong></div>';
+            html += '<div>Tax ('+esc(d.tax_rate||0)+'%): '+esc(d.currency || '')+' '+Number(d.tax_amount||0).toFixed(2)+'</div>';
+            html += '<div>Discount: -'+esc(d.currency || '')+' '+Number(d.discount_amount||0).toFixed(2)+'</div>';
+            html += '<div style="font-weight:700; margin-top:6px">Total: '+esc(d.currency || '')+' '+Number(d.total_amount||0).toFixed(2)+'</div>';
+            html += '</div>';
+
+            container.innerHTML = html;
+        } catch (e) { console.warn('renderMiniPreview error', e); }
+    }
+
+        // Live PDF preview: serialize invoice and open preview modal or PDF
+        async function livePdfPreview(passedData) {
+            const btn = document.getElementById('live-pdf-preview-btn');
+            if (btn) btn.disabled = true;
+            console.log('livePdfPreview: start');
+            try {
+                const data = passedData || await serializePreviewData();
+                const csrftoken = getCsrf();
+                const resp = await fetch('{% url "invoice_live_preview" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrftoken
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    console.warn('livePdfPreview: server returned non-ok, showing HTML');
+                    showPreviewModalWithHtml(text, data);
+                    return;
+                }
+
+                const contentType = resp.headers.get('Content-Type') || '';
+                if (contentType.indexOf('application/pdf') !== -1) {
+                    const blob = await resp.blob();
+                    const filename = (data.invoice_number || 'invoice') + '.pdf';
+                    showPreviewModalWithPdf(blob, filename);
+                } else {
+                    const text = await resp.text();
+                    console.log('livePdfPreview: received HTML, rendering in modal');
+                    showPreviewModalWithHtml(text, data);
+                }
+            } catch (err) {
+                alert('Preview failed: ' + err);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        // When user clicks the top-level Download PDF button: try downloading PDF first, fall back to preview
+        async function previewOrDownload() {
+            const btn = document.getElementById('live-pdf-preview-btn');
+            if (btn) btn.disabled = true;
+            console.log('previewOrDownload: clicked');
+            try {
+                const data = await serializePreviewData();
+                const ok = await downloadPdfFromData(data);
+                if (ok) {
+                    console.log('PDF downloaded via XHR');
+                    return;
+                }
+                // If XHR didn't return a PDF, show the HTML preview first (if any).
+                // This makes the UI responsive even when the server returns HTML.
+                try {
+                    await livePdfPreview(data);
+                } catch (e) {
+                    console.warn('livePdfPreview failed', e);
+                }
+
+                // As a last resort, try the form POST fallback in a new tab/window
+                // which some servers handle as a download.
+                try {
+                    console.log('previewOrDownload: attempting fallback form submit');
+                    const fallbackOk = await fallbackSubmitFormPreview();
+                    if (fallbackOk) return;
+                } catch (err) {
+                    console.warn('Fallback form submit failed', err);
+                }
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        // Fallback helper: submit current `#invoice-form` as a normal POST to the
+        // preview endpoint in a new tab/window so browser will handle a file download
+        // (useful when server expects form-encoded POSTs instead of JSON XHR).
+        function fallbackSubmitFormPreview() {
+            return new Promise((resolve, reject) => {
+                try {
+                    const original = document.getElementById('invoice-form');
+                    if (!original) return reject('No invoice form found');
+
+                    // create a hidden iframe to receive the form POST so no new tab is opened
+                    const iframeName = 'invoice_preview_iframe_' + Date.now();
+                    const hiddenI = document.createElement('iframe');
+                    hiddenI.name = iframeName;
+                    hiddenI.style.display = 'none';
+                    document.body.appendChild(hiddenI);
+
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = "{% url 'invoice_live_preview' %}?format=pdf";
+                    form.target = iframeName;
+
+                    // copy inputs from original form into hidden inputs on the new form
+                    const elements = Array.from(original.elements || []);
+                    elements.forEach(el => {
+                        if (!el.name) return;
+                        // skip buttons
+                        if (el.type === 'submit' || el.type === 'button') return;
+                        // handle checkboxes/radios: only copy if checked
+                        if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) return;
+
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = el.name;
+                        input.value = el.value;
+                        form.appendChild(input);
+                    });
+
+                    // Business photo upload removed; do not attempt to include files in hidden preview form.
+
+                    // ensure CSRF present
+                    const csrf = document.querySelector('input[name=csrfmiddlewaretoken]');
+                    if (csrf) {
+                        const c = document.createElement('input');
+                        c.type = 'hidden';
+                        c.name = 'csrfmiddlewaretoken';
+                        c.value = csrf.value;
+                        form.appendChild(c);
+                    }
+
+                    document.body.appendChild(form);
+
+                    // submit and clean up after a short delay
+                    form.submit();
+                    setTimeout(() => {
+                        try { form.remove(); } catch(e){}
+                        try { hiddenI.remove(); } catch(e){}
+                        resolve(true);
+                    }, 1500);
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }
+
+        // Download PDF handler: similar request but forces a file download if PDF returned
+        async function downloadPdf() {
+            const btn = document.getElementById('download-pdf-btn');
+            if (btn) btn.disabled = true;
+
+            try {
+                // Use the same serialization as the live preview so business snapshot and photo are included
+                const data = await serializePreviewData();
+                const ok = await downloadPdfFromData(data);
+                if (ok) return;
+
+                // if downloadPdfFromData didn't return a PDF, fall back to live preview in modal
+                await livePdfPreview(data);
+            } catch (err) {
+                alert('Download failed: ' + err);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+    // helper: download PDF by posting preview data and forcing a download (used by modal)
+    async function downloadPdfFromData(data) {
+        const csrftoken = getCsrf();
+        console.log('downloadPdfFromData: posting preview data to server');
+        try {
+            const resp = await fetch('{% url "invoice_live_preview" %}?format=pdf', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken,
+                    'Accept': 'application/pdf'
+                },
+                body: JSON.stringify(data)
+            });
+            console.log('downloadPdfFromData: response status', resp.status, 'content-type', resp.headers.get('Content-Type'));
+            if (!resp.ok) return null;
+            const ct = resp.headers.get('Content-Type') || '';
+            if (ct.indexOf('application/pdf') !== -1) {
+                const blob = await resp.blob();
+                const filename = (data.invoice_number || 'invoice') + '.pdf';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(url);
+                return true;
+            }
+            return null;
+        } catch (e) {
+            console.warn('downloadPdfFromData: error', e);
+            return null;
+        }
+    }
+
+    // Modal helpers
+    let _lastPreviewData = null;
+    let _lastPreviewHtml = null;
+    function showPreviewModalWithPdf(blob, filename) {
+        const body = document.getElementById('invoice-preview-modal-body');
+        if (!body) {
+            // fallback: no modal available — trigger a direct download without opening a new tab
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename || 'invoice.pdf'; document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => { try { URL.revokeObjectURL(url); } catch(e){} }, 1500);
+            return;
+        }
+        body.innerHTML = '';
+        const url = URL.createObjectURL(blob);
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.style.width = '100%';
+        iframe.style.height = '75vh';
+        iframe.setAttribute('aria-label', 'Invoice PDF preview');
+        body.appendChild(iframe);
+        // Add a transparent overlay to block direct clicks inside the iframe
+        // This prevents any element inside the preview from opening new tabs.
+        try {
+            // ensure container is positioned so overlay can be absolute
+            body.style.position = body.style.position || 'relative';
+            // remove any existing blocker
+            const existing = document.getElementById('preview-iframe-blocker');
+            if (existing) existing.remove();
+            const blocker = document.createElement('div');
+            blocker.id = 'preview-iframe-blocker';
+            blocker.style.position = 'absolute';
+            blocker.style.left = '0';
+            blocker.style.top = '0';
+            blocker.style.width = '100%';
+            blocker.style.height = '75vh';
+            blocker.style.zIndex = '1050';
+            blocker.style.background = 'transparent';
+            blocker.title = 'Preview interaction blocked to prevent new tabs. Click "Enable interaction" to allow.';
+            // small control to allow temporary interaction if user needs it
+            const control = document.createElement('button');
+            control.type = 'button';
+            control.textContent = 'Enable interaction';
+            control.style.position = 'absolute';
+            control.style.right = '12px';
+            control.style.top = '12px';
+            control.className = 'btn btn-sm btn-outline-secondary';
+            control.addEventListener('click', function(ev){
+                ev.preventDefault(); ev.stopPropagation();
+                // remove blocker to allow interaction (still sandboxed, popups blocked)
+                try { blocker.remove(); } catch(e){}
+            });
+            blocker.appendChild(control);
+            // clicking anywhere on blocker will trigger modal download handler if it looks like a download intent
+            blocker.addEventListener('click', function(ev){
+                ev.preventDefault(); ev.stopPropagation();
+                modalDownloadHandler();
+            });
+            body.appendChild(blocker);
+        } catch (e) { console.warn('failed to add iframe interaction blocker', e); }
+        // cleanup previous blob URL if any
+        if (_lastPreviewData && _lastPreviewData.blobUrl) {
+            try { URL.revokeObjectURL(_lastPreviewData.blobUrl); } catch(e){}
+        }
+        _lastPreviewData = { blobUrl: url, filename };
+        // add floating download button inside modal (outside iframe so it's always visible)
+        addOrReplaceFloatingDownload(body, function() {
+            const a = document.createElement('a');
+            a.href = _lastPreviewData.blobUrl;
+            a.download = _lastPreviewData.filename || 'invoice.pdf';
+            document.body.appendChild(a); a.click(); a.remove();
+        });
+        const modalEl = document.getElementById('invoice-preview-modal');
+        if (window.bootstrap && modalEl) {
+            const m = new bootstrap.Modal(modalEl);
+            m.show();
+        } else if (modalEl) {
+            modalEl.style.display = 'block';
+        }
+    }
+
+    function showPreviewModalWithHtml(html, data) {
+        const body = document.getElementById('invoice-preview-modal-body');
+        if (!body) {
+            // fallback: no modal available — host preview in an offscreen iframe (no new tab)
+            const off = document.createElement('iframe');
+            off.style.position = 'fixed'; off.style.left = '-9999px'; off.style.top = '0';
+            off.style.width = '1px'; off.style.height = '1px'; off.style.border = '0';
+            document.body.appendChild(off);
+            try {
+                try { off.srcdoc = html; } catch (e) { off.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html); }
+            } catch (e) {
+                console.warn('offscreen preview failed', e);
+            }
+            return;
+        }
+        // render HTML inside an isolated iframe so full-page HTML doesn't break modal layout
+        body.innerHTML = '';
+        const iframe = document.createElement('iframe');
+        iframe.style.width = '100%';
+        iframe.style.height = '75vh';
+        iframe.setAttribute('aria-label', 'Invoice HTML preview');
+        // sandbox the preview iframe to prevent it from opening new tabs/windows
+        // allow-same-origin so we can inspect/print; DO NOT allow popups (no allow-popups)
+        try { iframe.sandbox = 'allow-same-origin allow-scripts'; } catch (e) { /* ignore */ }
+        // Inject a small sanitizer script into the returned HTML and render via srcdoc.
+        // We avoid allow-same-origin to prevent sandbox escape; sanitizer overrides
+        // window.open and intercepts clicks that look like downloads/prints, forwarding
+        // them to the parent via postMessage so the modal handler can take over.
+        function makeSanitizedSrcdoc(originalHtml) {
+            const sanitizer = `<script>
+                (function(){
+                    try{
+                        window.open = function(){ try{ parent.postMessage({ action: 'downloadPreviewFromIframe' }, '*'); }catch(e){}; return null; };
+                        document.addEventListener('click', function(e){
+                            var t = e.target;
+                            while(t && t !== document){
+                                var txt = (t.innerText || t.textContent || '').toLowerCase();
+                                if ((t.tagName === 'A' && txt.indexOf('download') !== -1) || (t.tagName === 'BUTTON' && (txt.indexOf('download') !== -1 || txt.indexOf('print') !== -1))){
+                                    e.preventDefault();
+                                    try{ parent.postMessage({ action: 'downloadPreviewFromIframe' }, '*'); }catch(e){}
+                                    return false;
+                                }
+                                t = t.parentElement;
+                            }
+                        }, true);
+                        document.querySelectorAll('a[target]').forEach(function(a){ a.removeAttribute('target'); });
+                    }catch(e){}
+                })();
+            <\/script>`;
+            if (/<head[^>]*>/i.test(originalHtml)) {
+                return originalHtml.replace(/<head([^>]*)>/i, '<head$1>' + sanitizer);
+            } else if (/<body[^>]*>/i.test(originalHtml)) {
+                return originalHtml.replace(/<body([^>]*)>/i, '<body$1>' + sanitizer);
+            } else {
+                return sanitizer + originalHtml;
+            }
+        }
+
+        try {
+            // sandbox the preview iframe to prevent it from opening new tabs/windows
+            // allow-scripts so preview JS still runs; DO NOT allow-same-origin or allow-popups
+            iframe.sandbox = 'allow-scripts';
+            const safeSrcdoc = makeSanitizedSrcdoc(html);
+            iframe.srcdoc = safeSrcdoc;
+        } catch (e) {
+            console.warn('iframe.srcdoc injection failed, opening fallback window', e);
+            // fallback to offscreen iframe if srcdoc injection not permitted
+            const off = document.createElement('iframe');
+            off.style.position = 'fixed'; off.style.left = '-9999px'; off.style.top = '0';
+            off.style.width = '1px'; off.style.height = '1px'; off.style.border = '0';
+            document.body.appendChild(off);
+            try { off.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(html); } catch (ee) { console.warn('offscreen fallback failed', ee); }
+        }
+
+        body.appendChild(iframe);
+        _lastPreviewData = data || null;
+        _lastPreviewHtml = html || null;
+        // ensure header Download button visible and wired to unified download handler
+        addOrReplaceFloatingDownload(body, async function() {
+            await modalDownloadHandler();
+        });
+        // try background PDF download (if server can return PDF) so user can get PDF immediately
+        (async () => {
+            try {
+                const ok = await downloadPdfFromData(data);
+                if (ok) console.log('Background PDF downloaded');
+            } catch (e) {
+                console.warn('Background PDF attempt failed', e);
+            }
+        })();
+        const modalEl = document.getElementById('invoice-preview-modal');
+        if (window.bootstrap && modalEl) {
+            console.log('showPreviewModalWithHtml: showing bootstrap modal');
+            const m = new bootstrap.Modal(modalEl);
+            m.show();
+        } else if (modalEl) {
+            console.log('showPreviewModalWithHtml: bootstrap not available, setting display block');
+            modalEl.style.display = 'block';
+        }
+    }
+
+    // helper to show & wire header download button (always present in modal header)
+    function addOrReplaceFloatingDownload(containerEl, onClick) {
+        const headerBtn = document.getElementById('preview-floating-download');
+        if (!headerBtn) return;
+        headerBtn.style.display = 'inline-block';
+        // assign handler directly (avoids cloning which drops listeners)
+        headerBtn.onclick = onClick;
+        // also wire floating in-body button if present
+        const floatBtn = document.getElementById('preview-floating-download-float');
+        if (floatBtn) {
+            floatBtn.style.display = 'inline-block';
+            floatBtn.onclick = onClick;
+        }
+    }
+
+    // Unified modal download handler: try XHR PDF download; if server returns HTML,
+    // open printable HTML in a new window so user can Save as PDF via print dialog.
+    async function modalDownloadHandler() {
+        // Always attempt a fresh serialization/download first so updated photo/fields are used
+        try {
+            const fresh = await serializePreviewData();
+            const okFresh = await downloadPdfFromData(fresh);
+            if (okFresh) return;
+        } catch (e) { console.warn('modalDownloadHandler: fresh download failed', e); }
+
+        if (_lastPreviewData && _lastPreviewData.blobUrl) {
+            const a = document.createElement('a');
+            a.href = _lastPreviewData.blobUrl;
+            a.download = _lastPreviewData.filename || 'invoice.pdf';
+            document.body.appendChild(a); a.click(); a.remove();
+            return;
+        }
+        if (_lastPreviewData) {
+            const ok = await downloadPdfFromData(_lastPreviewData);
+            if (ok) return;
+        }
+        if (_lastPreviewHtml) {
+            try {
+                // First attempt: print from the visible modal iframe (if same-origin)
+                const modalIframe = document.querySelector('#invoice-preview-modal-body iframe');
+                try {
+                    if (modalIframe && modalIframe.contentWindow) {
+                        modalIframe.contentWindow.focus();
+                        modalIframe.contentWindow.print();
+                        return;
+                    }
+                } catch (e) { console.warn('modal iframe print failed', e); }
+
+                // Second attempt: create a temporary offscreen iframe with only the preview HTML
+                try {
+                    const safeHtml = (_lastPreviewHtml || '').replace(/<script[\s\S]*?<\/script>/gi, '');
+                    const printable = '<!doctype html><html><head><meta charset="utf-8"><title>Print</title>' +
+                        '<style>html,body{height:100%;margin:0;padding:0;background:#fff;color:#000}</style></head><body>' + safeHtml + '</body></html>';
+                    const printIframe = document.createElement('iframe');
+                    // place offscreen so it doesn't interfere with UI
+                    printIframe.style.position = 'fixed';
+                    printIframe.style.width = '0';
+                    printIframe.style.height = '0';
+                    printIframe.style.left = '-9999px';
+                    printIframe.style.top = '0';
+                    printIframe.style.border = '0';
+                    // append and set srcdoc
+                    document.body.appendChild(printIframe);
+                    try {
+                        printIframe.srcdoc = printable;
+                    } catch (e) {
+                        // fallback to data URL if srcdoc not supported
+                        printIframe.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(printable);
+                    }
+                    printIframe.onload = function() {
+                        try {
+                            const pw = printIframe.contentWindow || printIframe.contentDocument.defaultView;
+                            if (pw) { pw.focus(); pw.print(); }
+                        } catch (ee) { console.warn('print iframe print failed', ee); }
+                        setTimeout(() => { try { printIframe.remove(); } catch(e){} }, 1000);
+                    };
+                    return;
+                } catch (e) { console.warn('offscreen iframe print failed', e); }
+                // as a fallback, open a minimal printable window, trigger print, then close it
+                // Popup/window fallback removed to avoid new tabs — report to user
+                console.warn('Popup print fallback suppressed to avoid opening new tabs');
+                alert('Printing from modal failed. Try enabling interaction in the preview or save the preview and print locally.');
+                return;
+            } catch (e) {
+                console.warn('Failed to print preview', e);
+            }
+        }
+        alert('No PDF available. Try saving or printing the preview.');
+    }
+
+    // cleanup blob URL and floating button when modal hidden
+    document.addEventListener('DOMContentLoaded', function() {
+        const modalEl = document.getElementById('invoice-preview-modal');
+        if (!modalEl) return;
+        modalEl.addEventListener('hidden.bs.modal', function() {
+            if (_lastPreviewData && _lastPreviewData.blobUrl) {
+                try { URL.revokeObjectURL(_lastPreviewData.blobUrl); } catch(e){}
+            }
+            _lastPreviewData = null;
+            _lastPreviewHtml = null;
+            const floatBtn = document.getElementById('preview-floating-download');
+            if (floatBtn) floatBtn.style.display = 'none';
+            const floatBtn2 = document.getElementById('preview-floating-download-float');
+            if (floatBtn2) floatBtn2.style.display = 'none';
+        });
+    });
+
+    // wire modal download button
+    document.addEventListener('DOMContentLoaded', function() {
+        const modalDl = document.getElementById('modal-download-btn');
+        if (modalDl) modalDl.addEventListener('click', async function() {
+            await modalDownloadHandler();
+        });
+    });
+
+    // wire delete-selected button
+    document.addEventListener('DOMContentLoaded', function() {
+        const delBtn = document.getElementById('delete-selected-btn');
+        if (delBtn) delBtn.addEventListener('click', function() {
+            if (!confirm('Delete selected items?')) return;
+            try { deleteSelectedItems(); } catch (e) { console.warn('deleteSelectedItems failed', e); }
+        });
+    });
+
+    // Standard save handler: allow normal form POST so server-side view handles
+    // saving all fields, formset items and uploaded files (preserves redirects).
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('invoice-form');
+        if (!form) return;
+        // Prevent double-submit while allowing the browser to perform a normal
+        // multipart/form-data POST so files and all invoice snapshot fields are sent.
+        form.addEventListener('submit', function(e) {
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                try { submitBtn.innerHTML = '<i class="fas fa-save me-2"></i>Saving...'; } catch(e){}
+            }
+            // Do NOT call e.preventDefault(); let the browser submit the form normally.
+        });
+    });
+
+        // Multi-currency support: fetch exchange rate and format totals using Intl
+        const baseCurrency = 'USD'; // assumed base currency for entered amounts
+        async function updateCurrencyDisplay(target) {
+            if (!target || target === baseCurrency) {
+                // just re-run calculateTotals which uses entered values
+                calculateTotals();
+                return;
+            }
+            try {
+                const r = await fetch(`/api/exchange-rate/?base=${baseCurrency}&target=${target}`);
+                const data = await r.json();
+                if (!r.ok || !data.rate) throw new Error(data.error || 'Rate lookup failed');
+                const rate = parseFloat(data.rate);
+
+                // convert numeric displays by applying rate
+                const subtotalEl = document.getElementById('subtotal-display');
+                const taxEl = document.getElementById('tax-display');
+                const discountEl = document.getElementById('discount-display');
+                const totalEl = document.getElementById('total-display');
+
+                function toNum(s) { return parseFloat(s.replace(/[^0-9.-]+/g, '')) || 0; }
+                const s = toNum(subtotalEl.textContent) * rate;
+                const t = toNum(taxEl.textContent) * rate;
+                const d = toNum(discountEl.textContent) * rate;
+                const tot = toNum(totalEl.textContent) * rate;
+
+                subtotalEl.textContent = new Intl.NumberFormat(undefined, {style:'currency', currency: target}).format(s);
+                taxEl.textContent = new Intl.NumberFormat(undefined, {style:'currency', currency: target}).format(t);
+                discountEl.textContent = new Intl.NumberFormat(undefined, {style:'currency', currency: target}).format(d);
+                totalEl.textContent = new Intl.NumberFormat(undefined, {style:'currency', currency: target}).format(tot);
+            } catch (err) {
+                console.warn('Currency update failed', err);
+            }
+        }
+
+        const currencyInput = document.getElementById('id_currency');
+        if (currencyInput) {
+            currencyInput.addEventListener('change', function() {
+                updateCurrencyDisplay(currencyInput.value || baseCurrency);
+            });
+        }
+
+    // Helper: update preview client/address by id
+    function updatePreviewClientById(clientId) {
+        // If no client selected, show editable fields and clear them so user can type manually
+        if (!clientId) {
+            const el = document.querySelector('#preview-client span');
+            if (el) el.textContent = '';
+            try {
+                const showEdit = document.getElementById('client-edit-fields');
+                if (showEdit) {
+                    showEdit.style.display = 'block';
+                    showEdit.querySelectorAll('input,textarea').forEach(function(i){ try { i.value = ''; } catch(e){} });
+                }
+            } catch (e) {}
+            // update compact preview now that client was cleared
+            try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) { /* ignore */ }
+            return;
+        }
+
+        fetch(`/clients/${clientId}/json/`)
+            .then(r => r.ok ? r.json() : {})
+            .then(data => {
+                if (!data) return;
+                // prefer consolidated address, fall back to components
+                let addr = '';
+                if (data.address) addr = data.address;
+                else {
+                    const parts = [];
+                    if (data.street) parts.push(data.street);
+                    if (data.city) parts.push(data.city);
+                    if (data.state) parts.push(data.state);
+                    if (data.zip_code) parts.push(data.zip_code);
+                    if (data.country) parts.push(data.country);
+                    addr = parts.join(', ');
+                }
+                const name = data.name || data.display || 'Client';
+                const el = document.querySelector('#preview-client span');
+                if (el) el.textContent = name + (addr ? ' — ' + addr : '');
+                // populate editable form fields so user can override for this invoice
+                try {
+                    const idName = document.getElementById('id_client_name');
+                    const idEmail = document.getElementById('id_client_email');
+                    const idPhone = document.getElementById('id_client_phone');
+                    const idAddr = document.getElementById('id_client_address');
+                    if (idName) idName.value = data.name || '';
+                    if (idEmail) idEmail.value = data.email || '';
+                    if (idPhone) idPhone.value = data.phone || '';
+                    if (idAddr) idAddr.value = data.address || addr || '';
+                    const showEdit = document.getElementById('client-edit-fields');
+                    if (showEdit) showEdit.style.display = 'block';
+                    // update compact preview now that client data populated
+                    try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) { console.warn('renderMiniPreview after client fetch failed', e); }
+                } catch (e) {}
+            }).catch(()=>{});
+    }
+
+    // Helper: update preview business info by id (mirrors client behavior)
+    function updatePreviewBusinessById(businessId) {
+        const previewLogo = document.getElementById('preview-business-logo');
+        const showEdit = document.getElementById('business-edit-fields');
+        if (!businessId) {
+            // Keep editable business fields available even when no business selected
+            if (showEdit) {
+                try {
+                    showEdit.style.display = 'block';
+                    showEdit.querySelectorAll('input,textarea').forEach(function(i){ i.value = ''; });
+                    const idBiz = document.getElementById('id_business_id'); if (idBiz) idBiz.value = '';
+                } catch(e){}
+            }
+            if (previewLogo) { previewLogo.src = ''; previewLogo.style.display = 'none'; }
+            try {
+                const leftPreview = document.getElementById('business-left-preview');
+                const inlinePhotoBlock = document.getElementById('business-photo-preview');
+                if (leftPreview) { leftPreview.src = ''; leftPreview.style.display = 'none'; }
+                if (inlinePhotoBlock) { inlinePhotoBlock.style.display = 'none'; inlinePhotoBlock.src = ''; }
+            } catch(e){}
+            return;
+        }
+        fetch(`/businesses/${businessId}/json/`)
+            .then(r => r.ok ? r.json() : Promise.reject())
+            .then(data => {
+                if (!data) return;
+                // populate preview logo if present (sidebar) and the new left-side preview
+                try {
+                    if (data.logo_url && previewLogo) { previewLogo.src = data.logo_url; previewLogo.style.display = 'inline-block'; }
+                    const leftPreview = document.getElementById('business-left-preview');
+                    const inlinePhotoBlock = document.getElementById('business-photo-preview');
+                    if (leftPreview && data.logo_url) { leftPreview.src = data.logo_url; leftPreview.style.display = 'inline-block'; }
+                    // hide the old inline photo preview (file upload area)
+                    if (inlinePhotoBlock) { inlinePhotoBlock.style.display = 'none'; inlinePhotoBlock.src = ''; }
+                } catch (e) {}
+                // populate editable form fields
+                try {
+                    const idName = document.getElementById('id_business_name_text');
+                    const idEmail = document.getElementById('id_business_email_text');
+                    const idPhone = document.getElementById('id_business_phone_text');
+                    const idAddr = document.getElementById('id_business_address_text');
+                    const idBiz = document.getElementById('id_business_id');
+                    if (idName) idName.value = data.business_name || '';
+                    if (idEmail) idEmail.value = data.email || '';
+                    if (idPhone) idPhone.value = data.phone || '';
+                    if (idAddr) idAddr.value = data.address || '';
+                    if (idBiz) idBiz.value = data.id || businessId;
+                    if (showEdit) showEdit.style.display = 'block';
+                    try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) { /* ignore */ }
+                } catch (e) {}
+            }).catch(()=>{
+                // fallback: try to read data-* from selected option
+                try {
+                    const sel = document.getElementById('id_business_select');
+                    if (sel) {
+                        const opt = sel.options[sel.selectedIndex];
+                        if (opt) {
+                            const name = opt.dataset.name || '';
+                            const email = opt.dataset.email || '';
+                            const phone = opt.dataset.phone || '';
+                            const addr = opt.dataset.address || '';
+                            const logo = opt.dataset.logo || '';
+                            const idName = document.getElementById('id_business_name_text');
+                            const idEmail = document.getElementById('id_business_email_text');
+                            const idPhone = document.getElementById('id_business_phone_text');
+                            const idAddr = document.getElementById('id_business_address_text');
+                            const idBiz = document.getElementById('id_business_id');
+                            if (idName) idName.value = name;
+                            if (idEmail) idEmail.value = email;
+                            if (idPhone) idPhone.value = phone;
+                            if (idAddr) idAddr.value = addr;
+                            if (idBiz) idBiz.value = businessId;
+                            if (previewLogo && logo) { previewLogo.src = logo; previewLogo.style.display = 'inline-block'; }
+                            try {
+                                const leftPreview = document.getElementById('business-left-preview');
+                                const inlinePhotoBlock = document.getElementById('business-photo-preview');
+                                if (leftPreview && logo) { leftPreview.src = logo; leftPreview.style.display = 'inline-block'; }
+                                if (inlinePhotoBlock) { inlinePhotoBlock.style.display = 'none'; inlinePhotoBlock.src = ''; }
+                            } catch(e) {}
+                            if (showEdit) showEdit.style.display = 'block';
+                            try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) { /* ignore */ }
+                        }
+                    }
+                } catch (e) {}
+            });
+    }
+
+    // update preview when client select changes
+    document.addEventListener('change', function(e) {
+        if (e.target && e.target.id === 'id_client') {
+            updatePreviewClientById(e.target.value);
+        }
+        if (e.target && e.target.id === 'id_business_select') {
+            updatePreviewBusinessById(e.target.value);
+        }
+    });
+
+    // Ensure item tbody uses delegated listeners for reliable, immediate updates
+    try {
+        const itemsTbody = document.getElementById('items-tbody');
+        if (itemsTbody) {
+            itemsTbody.addEventListener('input', function(e){
+                const t = e.target;
+                if (!t) return;
+                if (t.matches && (t.matches('[name$="-description"]') || t.matches('input[name$="-quantity"]') || t.matches('input[name$="-unit_price"]') )) {
+                    calculateTotals();
+                }
+            });
+            itemsTbody.addEventListener('change', function(e){
+                const t = e.target;
+                if (!t) return;
+                if (t.matches && t.matches('input[type="checkbox"][name$="-DELETE"]')) {
+                    calculateTotals();
+                }
+            });
+        }
+    } catch (err) { /* ignore */ }
+
+    // Delegated listeners: ensure any item field edits update totals/mini-preview immediately
+    document.addEventListener('input', function(e){
+        try {
+            const t = e.target;
+            if (!t) return;
+            // item description/quantity/price edits
+            if (t.matches && (t.matches('[name$="-description"]') || t.matches('input[name$="-quantity"]') || t.matches('input[name$="-unit_price"]') || t.classList && (t.classList.contains('item-quantity') || t.classList.contains('item-price')))) {
+                calculateTotals();
+            }
+            // client editable fields also refresh preview (already wired, but delegation ensures coverage)
+            if (t.matches && (t.id === 'id_client_name' || t.id === 'id_client_address')) {
+                try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e){}
+            }
+        } catch (err) { /* ignore */ }
+    });
+
+    document.addEventListener('change', function(e){
+        try {
+            const t = e.target;
+            if (!t) return;
+            // delete checkbox or business select changes affect totals/preview
+            if (t.matches && (t.matches('input[type="checkbox"][name$="-DELETE"]') || t.id === 'id_business_select')) {
+                calculateTotals();
+            }
+        } catch (err) { /* ignore */ }
+    });
+    
+    // Capture-phase listener to guarantee description typing updates preview immediately
+    document.addEventListener('input', function(e){
+        try {
+            const t = e.target;
+            if (!t) return;
+            const name = (t.getAttribute && t.getAttribute('name')) || '';
+            if (name && name.endsWith('-description')) {
+                // run totals (also triggers mini-preview rebuild)
+                try { calculateTotals(); } catch(e) {}
+                // also attempt direct mini-preview render in case totals path fails
+                try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) {}
+            }
+        } catch (err) { /* ignore */ }
+    }, true);
+    
+    // Add new item row
+    function addItem() {
+        const tbody = document.getElementById('items-tbody');
+        const tmplEl = document.getElementById('empty-form-template');
+        if (!tbody || !tmplEl) {
+            console.warn('Missing items tbody or empty form template');
+            return;
+        }
+        const template = tmplEl.innerHTML;
+
+        // robustly locate TOTAL_FORMS (by name or id)
+        const totalForms = document.querySelector('input[name$="-TOTAL_FORMS"]') || document.getElementById('id_form-TOTAL_FORMS');
+        const formIdx = totalForms ? (parseInt(totalForms.value) || 0) : 0;
+
+        // Replace Django's __prefix__ placeholder with the new index
+        const rowHtml = template.replace(/__prefix__/g, formIdx);
+        // create a temporary container
+        const temp = document.createElement('tbody');
+        temp.innerHTML = rowHtml;
+        const newRow = temp.querySelector('tr');
+
+        if (!newRow) {
+            console.warn('Failed to create new row from template');
+            return;
+        }
+
+        // append and update management form
+        tbody.appendChild(newRow);
+        if (totalForms) totalForms.value = formIdx + 1;
+
+        // ensure newly added inputs have unique ids to avoid duplicate id warnings
+        (function ensureUniqueIds(row, idx) {
+            const seen = {};
+            // collect existing ids in document (before change)
+            document.querySelectorAll('input[id],select[id],textarea[id]').forEach(el => {
+                if (!el.id) return;
+                seen[el.id] = (seen[el.id] || 0) + 1;
+            });
+
+            row.querySelectorAll('input[id],select[id],textarea[id],label[for]').forEach(el => {
+                if (el.tagName.toLowerCase() === 'label') return;
+                const id = el.id;
+                if (!id) return;
+                // if id is duplicated elsewhere, suffix it with the new index
+                const occurrences = document.querySelectorAll('#' + CSS.escape(id)).length;
+                if (occurrences > 1) {
+                    const newId = id + '-' + idx;
+                    // update element id
+                    el.id = newId;
+                    // update any labels inside the new row that referred to the old id
+                    row.querySelectorAll('label[for="' + id + '"]').forEach(lbl => lbl.setAttribute('for', newId));
+                }
+            });
+        })(newRow, formIdx);
+
+        // ensure newly added inputs have listeners
+        newRow.querySelectorAll('.item-quantity, .item-price').forEach(input => {
+            input.addEventListener('input', calculateTotals);
+        });
+        // ensure description inputs trigger preview updates
+        newRow.querySelectorAll('[name$="-description"]').forEach(function(inp){
+            inp.removeEventListener('input', calculateTotals);
+            inp.addEventListener('input', calculateTotals);
+        });
+        // ensure delete checkbox toggles totals
+        const del = newRow.querySelector('input[name$="-DELETE"]');
+        if (del) del.addEventListener('change', calculateTotals);
+
+        // wire inputs first, then recalc totals so initial values show correctly
+        try { wireItemInputs(); } catch(e) {}
+        calculateTotals();
+    }
+
+    // Wire item inputs: add classes for selectors and attach listeners to keep totals up-to-date
+    function wireItemInputs() {
+        // quantity inputs
+        document.querySelectorAll('input[name$="-quantity"]').forEach(function(inp){
+            if (!inp.classList.contains('item-quantity')) inp.classList.add('item-quantity');
+            inp.removeEventListener('input', calculateTotals);
+            inp.addEventListener('input', calculateTotals);
+        });
+        // unit price inputs
+        document.querySelectorAll('input[name$="-unit_price"]').forEach(function(inp){
+            if (!inp.classList.contains('item-price')) inp.classList.add('item-price');
+            inp.removeEventListener('input', calculateTotals);
+            inp.addEventListener('input', calculateTotals);
+        });
+        // description inputs (textareas or inputs) should update preview when edited
+        document.querySelectorAll('[name$="-description"]').forEach(function(inp){
+            inp.removeEventListener('input', calculateTotals);
+            inp.addEventListener('input', calculateTotals);
+        });
+        // delete checkboxes (per-row)
+        document.querySelectorAll('input[type="checkbox"][name$="-DELETE"]').forEach(function(chk){
+            chk.removeEventListener('change', calculateTotals);
+            chk.addEventListener('change', calculateTotals);
+        });
+
+        // select-all delete checkbox
+        const selectAll = document.getElementById('select-all-delete');
+        if (selectAll) {
+            // initialize state: unchecked
+            selectAll.checked = false;
+            selectAll.removeEventListener('change', _selectAllHandler);
+            selectAll.addEventListener('change', _selectAllHandler);
+        }
+
+        function _selectAllHandler(e){
+            const checked = !!e.target.checked;
+            document.querySelectorAll('input[type="checkbox"][name$="-DELETE"]').forEach(function(chk){
+                try { chk.checked = checked; } catch(_){}
+            });
+            calculateTotals();
+        }
+    }
+
+    // Delete selected items: for existing items mark DELETE and hide row; for newly-added rows remove them and adjust TOTAL_FORMS
+    function deleteSelectedItems() {
+        const tbody = document.getElementById('items-tbody');
+        if (!tbody) return;
+        // locate TOTAL_FORMS input
+        const totalFormsEl = document.querySelector('input[name$="-TOTAL_FORMS"]') || document.getElementById('id_form-TOTAL_FORMS');
+        let totalForms = totalFormsEl ? (parseInt(totalFormsEl.value) || 0) : null;
+
+        // iterate rows and process checked deletes
+        const rows = Array.from(tbody.querySelectorAll('tr.item-row'));
+        rows.forEach(row => {
+            const del = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+            if (!del || !del.checked) return;
+
+            // existing row detection: presence of a hidden id input in the row
+            const idInput = row.querySelector('input[type="hidden"][name$="-id"]');
+            if (idInput) {
+                // mark for deletion (ensure checkbox is checked) and hide the row
+                try { del.checked = true; } catch (e) {}
+                row.style.display = 'none';
+            } else {
+                // newly added row: remove from DOM and decrement TOTAL_FORMS
+                row.remove();
+                if (totalFormsEl && totalForms !== null) {
+                    totalForms = Math.max(0, totalForms - 1);
+                    totalFormsEl.value = totalForms;
+                }
+            }
+        });
+
+        // uncheck select-all after deletion
+        const selectAll = document.getElementById('select-all-delete');
+        if (selectAll) selectAll.checked = false;
+
+        // re-run wiring and totals
+        try { wireItemInputs(); } catch (e) {}
+        calculateTotals();
+    }
+
+    // listen for download requests from preview iframe (invoice_pdf.html)
+    window.addEventListener('message', function(e) {
+        try {
+            const data = (typeof e.data === 'object') ? e.data : null;
+            if (!data) return;
+            if (data.action === 'downloadPreview' || data.action === 'downloadPreviewFromIframe') {
+                // If preview already exists, use unified modal download handler.
+                if (_lastPreviewData || _lastPreviewHtml) {
+                    modalDownloadHandler();
+                } else {
+                    // otherwise, serialize, render preview (to set _lastPreviewHtml), then trigger download/print
+                    serializePreviewData().then(async d => {
+                        try {
+                            await livePdfPreview(d);
+                        } catch (e) {}
+                        try { await modalDownloadHandler(); } catch(e){}
+                    }).catch(()=>{});
+                }
+            }
+        } catch (err) {}
+    });
+
+// Ensure Invoice Number updates the live preview in real time
+document.addEventListener('DOMContentLoaded', function() {
+    const invInput = document.getElementById('id_invoice_number');
+    const dateInput = document.getElementById('id_invoice_date');
+    const dueInput = document.getElementById('id_due_date');
+    const statusInput = document.getElementById('id_status');
+    const paymentInput = document.getElementById('id_payment_terms');
+    const notesInput = document.getElementById('id_notes');
+    const bizSelect = document.getElementById('id_business_select');
+    const bizName = document.getElementById('id_business_name_text');
+    const bizAddr = document.getElementById('id_business_address_text');
+    const bizEmail = document.getElementById('id_business_email_text');
+    const bizPhone = document.getElementById('id_business_phone_text');
+
+    function refreshAllPreviewFields() {
+        const val = invInput ? (invInput.value || 'PREVIEW') : 'PREVIEW';
+        const titleEl = document.getElementById('preview-inv-number');
+        if (titleEl) titleEl.textContent = val;
+        // also update any generic preview markers
+        document.querySelectorAll('.preview-invoice-number').forEach(function(el){ el.textContent = val; });
+        // rebuild and render compact preview so date/due/business/status/notes update immediately
+        try {
+            const d = buildPreviewDataSync();
+            renderMiniPreview(d);
+        } catch (e) { console.warn('refreshAllPreviewFields failed', e); }
+    }
+
+    if (invInput) invInput.addEventListener('input', refreshAllPreviewFields);
+    if (dateInput) dateInput.addEventListener('change', refreshAllPreviewFields);
+    if (dueInput) dueInput.addEventListener('change', refreshAllPreviewFields);
+    if (statusInput) statusInput.addEventListener('change', refreshAllPreviewFields);
+    if (paymentInput) paymentInput.addEventListener('input', refreshAllPreviewFields);
+    if (notesInput) notesInput.addEventListener('input', refreshAllPreviewFields);
+    if (bizSelect) bizSelect.addEventListener('change', function(){ updatePreviewBusinessById(this.value); refreshAllPreviewFields(); });
+    [bizName,bizAddr,bizEmail,bizPhone].forEach(function(i){ if (i) i.addEventListener('input', refreshAllPreviewFields); });
+
+    // run once on load to ensure sidebar matches any prefilled values
+    refreshAllPreviewFields();
+});
+</script>
+{% endblock %}
