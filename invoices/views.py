@@ -44,11 +44,9 @@ from django.http import HttpResponseForbidden
 def get_invoice_or_404_for_user(pk, user):
 	"""Return Invoice by pk if owned by `user` or if `user` is superuser; else raise Http404."""
 	# Prefer non-deleted invoices for regular users
-	if getattr(user, 'is_superuser', False):
-		invoice = get_object_or_404(Invoice, pk=pk)
-	else:
-		invoice = get_object_or_404(Invoice, pk=pk, is_deleted=False)
-	if not getattr(user, 'is_superuser', False) and getattr(invoice, 'user_id', None) != getattr(user, 'id', None):
+	# Always enforce ownership: only return invoices owned by the requesting user
+	invoice = get_object_or_404(Invoice, pk=pk, user=user, is_deleted=False)
+	if getattr(invoice, 'user_id', None) != getattr(user, 'id', None):
 		raise Http404('No Invoice matches the given query.')
 	return invoice
 
@@ -57,20 +55,17 @@ def get_business_or_404_for_user(pk, user):
 	"""Return BusinessProfile by pk if visible to `user` or raise Http404.
 	Regular users only see non-deleted businesses they own; superusers see all.
 	"""
-	if getattr(user, 'is_superuser', False):
-		bp = get_object_or_404(BusinessProfile, pk=pk)
-	else:
-		bp = get_object_or_404(BusinessProfile, pk=pk, is_deleted=False)
-	if not getattr(user, 'is_superuser', False) and getattr(bp, 'user_id', None) != getattr(user, 'id', None):
+	# Always enforce ownership: only return business profiles owned by the requesting user
+	bp = get_object_or_404(BusinessProfile, pk=pk, user=user, is_deleted=False)
+	if getattr(bp, 'user_id', None) != getattr(user, 'id', None):
 		raise Http404('No BusinessProfile matches the given query.')
 	return bp
 
 
 def get_businesses_for_user(user):
-    """Return BusinessProfile queryset visible to `user` (superuser sees all)."""
-    if getattr(user, 'is_superuser', False):
-        return BusinessProfile.objects.filter(is_deleted=False).order_by('-created_at')
-    return BusinessProfile.objects.filter(user=user, is_deleted=False).order_by('-created_at')
+	"""Return BusinessProfile queryset visible to `user` (superuser sees all)."""
+	# Enforce user-scoped businesses for all accounts
+	return BusinessProfile.objects.filter(user=user, is_deleted=False).order_by('-created_at')
 
 def login_view(request):
 	if request.user.is_authenticated:
@@ -96,7 +91,7 @@ def business_restore(request, trash_pk):
 	if not t:
 		messages.error(request, 'Trashed business not found.')
 		return redirect('business_trash_list')
-	if not request.user.is_superuser and t.user_id != request.user.id:
+	if t.user_id != request.user.id:
 		messages.error(request, 'Not authorized to restore this item.')
 		return redirect('business_trash_list')
 	new_pk = _restore_business_from_trash(trash_pk)
@@ -130,13 +125,9 @@ def logout_view(request):
 
 @login_required
 def dashboard_view(request):
-	# Determine invoices in scope (superuser sees all)
-	if request.user.is_superuser:
-		invoices_qs = Invoice.objects.filter(is_deleted=False)
-		clients_qs = Client.objects.filter(is_deleted=False)
-	else:
-		invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
-		clients_qs = Client.objects.filter(user=request.user, is_deleted=False)
+	# Only show the requesting user's invoices and clients
+	invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
+	clients_qs = Client.objects.filter(user=request.user, is_deleted=False)
 
 	totals = invoices_qs.aggregate(total_revenue=Sum('total_amount'))
 	total_revenue = totals.get('total_revenue') or Decimal('0.00')
@@ -254,11 +245,8 @@ def business_profile_setup(request):
 
 @login_required
 def client_list(request):
-	# Superusers see all clients; regular users see only their own
-	if request.user.is_superuser:
-		clients_qs = Client.objects.filter(is_deleted=False)
-	else:
-		clients_qs = Client.objects.filter(user=request.user, is_deleted=False)
+	# Only show clients owned by the requesting user
+	clients_qs = Client.objects.filter(user=request.user, is_deleted=False)
 
 	# filtering / search
 	q = request.GET.get('q', '').strip()
@@ -297,10 +285,7 @@ def client_list(request):
 @login_required
 def client_detail_api(request, pk):
 	# Only allow access to client details if the client belongs to the requesting user
-	if request.user.is_superuser:
-		client = get_object_or_404(Client, pk=pk, is_deleted=False)
-	else:
-		client = get_object_or_404(Client, pk=pk, user=request.user, is_deleted=False)
+	client = get_object_or_404(Client, pk=pk, user=request.user, is_deleted=False)
 	data = {
 		'id': client.pk,
 		'name': client.name,
@@ -383,11 +368,8 @@ def business_cancel_restore(request, business_pk):
 	This is a convenience used by the Cancel button after Restore & Edit.
 	"""
 	try:
-		# respect ownership
-		if not request.user.is_superuser:
-			bp = BusinessProfile.objects.get(pk=business_pk, user=request.user)
-		else:
-			bp = BusinessProfile.objects.get(pk=business_pk)
+		# respect ownership: require owner matches requesting user
+		bp = BusinessProfile.objects.get(pk=business_pk, user=request.user)
 	except BusinessProfile.DoesNotExist:
 		messages.error(request, 'Business profile not found or not authorized.')
 		return redirect('business_trash_list')
@@ -408,19 +390,8 @@ def invoice_list(request):
 	# base queryset
 	user_param = request.GET.get('user', '').strip()
 	show_all = request.GET.get('all', '') == '1'
-	if request.user.is_superuser:
-		# Superadmin: default to their own invoices unless `user` or `all=1` is provided
-		if show_all:
-			invoices_qs = Invoice.objects.filter(is_deleted=False)
-		elif user_param:
-			try:
-				invoices_qs = Invoice.objects.filter(user_id=int(user_param), is_deleted=False)
-			except Exception:
-				invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
-		else:
-			invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
-	else:
-		invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
+	# Always scope invoices to the requesting user
+	invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
 
 	# search and status filtering
 	q = request.GET.get('q', '').strip()
@@ -439,9 +410,8 @@ def _bulk_update_delete(model_cls, pks, action, user=None):
 	"""Helper to perform bulk actions on model instances.
 	action: 'trash', 'restore', 'delete'"""
 	objs = model_cls.objects.filter(pk__in=pks)
-	# Respect ownership when possible
-	if user and not getattr(user, 'is_superuser', False):
-		# filter by user attribute when present
+	# Respect ownership when a user is provided (enforce for all accounts)
+	if user:
 		if hasattr(model_cls, 'user'):
 			objs = objs.filter(user=user)
 	# Deprecated generic updater. Keep for compatibility but prefer model-specific trash handlers.
@@ -450,8 +420,8 @@ def _bulk_update_delete(model_cls, pks, action, user=None):
 
 def _move_business_to_trash(pk, user=None):
 	try:
-		# Respect ownership: if a user is provided and is not superuser, enforce it
-		if user and not getattr(user, 'is_superuser', False):
+		# Respect ownership: if a user is provided, enforce it for all accounts
+		if user:
 			b = BusinessProfile.objects.get(pk=pk, user=user)
 		else:
 			b = BusinessProfile.objects.get(pk=pk)
@@ -540,7 +510,7 @@ def _restore_business_from_trash(trash_pk):
 def _move_client_to_trash(pk, user=None):
 	try:
 		# Clients may be shared (user nullable). Enforce ownership when a user is provided.
-		if user and not getattr(user, 'is_superuser', False):
+		if user:
 			c = Client.objects.get(pk=pk, user=user)
 		else:
 			c = Client.objects.get(pk=pk)
@@ -621,7 +591,7 @@ def _restore_client_from_trash(trash_pk):
 def _move_invoice_to_trash(pk, user=None):
 	try:
 		# Enforce ownership: only allow moving invoices owned by the requesting user
-		if user and not getattr(user, 'is_superuser', False):
+		if user:
 			inv = Invoice.objects.get(pk=pk, user=user)
 		else:
 			inv = Invoice.objects.get(pk=pk)
@@ -840,13 +810,21 @@ def business_bulk_action(request):
 			messages.success(request, f'Moved {cnt} business profile(s) to trash.')
 		elif action == 'restore':
 			for pk in pks:
-				if _restore_business_from_trash(pk): cnt += 1
+				try:
+					t = BusinessProfileTrash.objects.filter(pk=pk, user_id=request.user.id).first()
+					if t:
+						if _restore_business_from_trash(pk):
+							cnt += 1
+				except Exception:
+					pass
 			messages.success(request, f'Restored {cnt} business profile(s).')
 		elif action == 'delete':
-			# permanently delete from trash
+			# permanently delete from trash (only own items)
 			for pk in pks:
 				try:
-					BusinessProfileTrash.objects.filter(pk=pk).delete(); cnt += 1
+					deleted, _ = BusinessProfileTrash.objects.filter(pk=pk, user_id=request.user.id).delete()
+					if deleted:
+						cnt += 1
 				except Exception:
 					pass
 			messages.success(request, f'Deleted {cnt} business profile(s) permanently.')
@@ -858,13 +836,11 @@ def business_bulk_action(request):
 @login_required
 def business_trash_list(request):
 	# show trashed businesses for the user with search and pagination
-	if request.user.is_superuser:
-		qs = BusinessProfileTrash.objects.all().order_by('-deleted_at')
-	else:
-		qs = BusinessProfileTrash.objects.filter(user=request.user).order_by('-deleted_at')
+	# Always limit trashed businesses to the requesting user's items
+	qs = BusinessProfileTrash.objects.filter(user_id=request.user.id).order_by('-deleted_at')
 	q = request.GET.get('q', '').strip()
 	if q:
-		qs = qs.filter(business_name__icontains=q) | qs.filter(email__icontains=q)
+		qs = qs.filter(Q(business_name__icontains=q) | Q(email__icontains=q))
 
 	# paginate
 	_raw_page = request.GET.get('page')
@@ -897,7 +873,7 @@ def business_restore_and_edit(request, trash_pk):
 		messages.error(request, 'Trashed business not found.')
 		return redirect('business_trash_list')
 
-	if not request.user.is_superuser and t.user_id != request.user.id:
+	if t.user_id != request.user.id:
 		messages.error(request, 'Not authorized to restore this item.')
 		return redirect('business_trash_list')
 	new_pk = _restore_business_from_trash(trash_pk)
@@ -925,12 +901,20 @@ def client_bulk_action(request):
 			messages.success(request, f'Moved {cnt} client(s) to trash.')
 		elif action == 'restore':
 			for pk in pks:
-				if _restore_client_from_trash(pk): cnt += 1
+				try:
+					t = ClientTrash.objects.filter(pk=pk, user_id=request.user.id).first()
+					if t:
+						if _restore_client_from_trash(pk):
+							cnt += 1
+				except Exception:
+					pass
 			messages.success(request, f'Restored {cnt} client(s).')
 		elif action == 'delete':
 			for pk in pks:
 				try:
-					ClientTrash.objects.filter(pk=pk).delete(); cnt += 1
+					deleted, _ = ClientTrash.objects.filter(pk=pk, user_id=request.user.id).delete()
+					if deleted:
+						cnt += 1
 				except Exception:
 					pass
 			messages.success(request, f'Deleted {cnt} client(s) permanently.')
@@ -942,13 +926,11 @@ def client_bulk_action(request):
 @login_required
 def client_trash_list(request):
 	# show trashed clients with search and pagination
-	if request.user.is_superuser:
-		qs = ClientTrash.objects.all().order_by('-deleted_at')
-	else:
-		qs = ClientTrash.objects.filter(user=request.user).order_by('-deleted_at')
+	# Always limit trashed clients to the requesting user's items
+	qs = ClientTrash.objects.filter(user_id=request.user.id).order_by('-deleted_at')
 	q = request.GET.get('q', '').strip()
 	if q:
-		qs = qs.filter(name__icontains=q) | qs.filter(email__icontains=q) | qs.filter(city__icontains=q)
+		qs = qs.filter(Q(name__icontains=q) | Q(email__icontains=q) | Q(city__icontains=q))
 
 	_raw_page = request.GET.get('page')
 	try:
@@ -986,12 +968,20 @@ def invoice_bulk_action(request):
 			messages.success(request, f'Moved {cnt} invoice(s) to trash.')
 		elif action == 'restore':
 			for pk in pks:
-				if _restore_invoice_from_trash(pk): cnt += 1
+				try:
+					t = InvoiceTrash.objects.filter(pk=pk, user_id=request.user.id).first()
+					if t:
+						if _restore_invoice_from_trash(pk):
+							cnt += 1
+				except Exception:
+					pass
 			messages.success(request, f'Restored {cnt} invoice(s).')
 		elif action == 'delete':
 			for pk in pks:
 				try:
-					InvoiceTrash.objects.filter(pk=pk).delete(); cnt += 1
+					deleted, _ = InvoiceTrash.objects.filter(pk=pk, user_id=request.user.id).delete()
+					if deleted:
+						cnt += 1
 				except Exception:
 					pass
 			messages.success(request, f'Deleted {cnt} invoice(s) permanently.')
@@ -1003,13 +993,11 @@ def invoice_bulk_action(request):
 @login_required
 def invoice_trash_list(request):
 	# show trashed invoices from the InvoiceTrash archive table with search and pagination
-	if request.user.is_superuser:
-		qs = InvoiceTrash.objects.all().order_by('-deleted_at')
-	else:
-		qs = InvoiceTrash.objects.filter(user=request.user).order_by('-deleted_at')
+	# Always limit trashed invoices to the requesting user's items
+	qs = InvoiceTrash.objects.filter(user_id=request.user.id).order_by('-deleted_at')
 	q = request.GET.get('q', '').strip()
 	if q:
-		qs = qs.filter(invoice_number__icontains=q) | qs.filter(client_name__icontains=q)
+		qs = qs.filter(Q(invoice_number__icontains=q) | Q(client_name__icontains=q))
 
 	_raw_page = request.GET.get('page')
 	try:
@@ -1034,8 +1022,8 @@ def invoice_trash_list(request):
 def invoice_trash_view(request, trash_pk):
 	"""Render a read-only view of a trashed invoice from the archive table."""
 	t = get_object_or_404(InvoiceTrash, pk=trash_pk)
-	# Ensure ownership
-	if not request.user.is_superuser and getattr(t, 'user_id', None) != getattr(request.user, 'id', None):
+	# Ensure ownership (superadmin accounts are treated like regular users)
+	if getattr(t, 'user_id', None) != getattr(request.user, 'id', None):
 		raise Http404('Not found')
 	from types import SimpleNamespace
 	invoice = SimpleNamespace(
@@ -1685,7 +1673,10 @@ def superadmin_user_invoices(request, user_id):
 	if not getattr(request.user, 'is_superuser', False):
 		return HttpResponseForbidden('Forbidden')
 	User = get_user_model()
+	# Only allow superadmins to view their own invoices (no cross-user visibility)
 	target_user = get_object_or_404(User, pk=user_id)
+	if target_user.pk != request.user.pk:
+		return HttpResponseForbidden('Forbidden')
 
 	q = request.GET.get('q', '').strip()
 	status = request.GET.get('status', '').strip()
@@ -1719,12 +1710,8 @@ def superadmin_all_invoices(request):
 	user_filter = request.GET.get('user', '').strip()
 	page = int(request.GET.get('page', 1) or 1)
 
-	invoices_qs = Invoice.objects.filter(is_deleted=False)
-	if user_filter:
-		try:
-			invoices_qs = invoices_qs.filter(user_id=int(user_filter))
-		except Exception:
-			pass
+	# Only show invoices owned by the requesting superadmin
+	invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
 	if q:
 		invoices_qs = invoices_qs.filter(Q(invoice_number__icontains=q) | Q(client__name__icontains=q))
 	if status:
@@ -1750,12 +1737,15 @@ def superadmin_businesses(request):
 	user_filter = request.GET.get('user', '').strip()
 	page = int(request.GET.get('page', 1) or 1)
 
-	qs = BusinessProfile.objects.filter(is_deleted=False)
+	# Only show businesses owned by the requesting superadmin
+	qs = BusinessProfile.objects.filter(user=request.user, is_deleted=False)
 	if user_filter:
 		try:
-			qs = qs.filter(user_id=int(user_filter))
+			# allow filtering to narrow down to own user id only
+			if int(user_filter) != request.user.id:
+				qs = qs.none()
 		except Exception:
-			pass
+			qs = qs.none()
 	if q:
 		qs = qs.filter(Q(business_name__icontains=q) | Q(email__icontains=q))
 
@@ -1772,12 +1762,14 @@ def superadmin_clients(request):
 	user_filter = request.GET.get('user', '').strip()
 	page = int(request.GET.get('page', 1) or 1)
 
-	qs = Client.objects.filter(is_deleted=False)
+	# Only show clients owned by the requesting superadmin
+	qs = Client.objects.filter(user=request.user, is_deleted=False)
 	if user_filter:
 		try:
-			qs = qs.filter(user_id=int(user_filter))
+			if int(user_filter) != request.user.id:
+				qs = qs.none()
 		except Exception:
-			pass
+			qs = qs.none()
 	if q:
 		qs = qs.filter(Q(name__icontains=q) | Q(email__icontains=q))
 
