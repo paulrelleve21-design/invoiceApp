@@ -23,7 +23,7 @@ import tempfile
 import os
 
 
-from .models import BusinessProfile, Client, Invoice, InvoiceItem, AdClick, BusinessProfileTrash, ClientTrash, InvoiceTrash
+from .models import BusinessProfile, Client, Invoice, InvoiceItem, AdClick, BusinessProfileTrash, ClientTrash, InvoiceTrash, InvoiceTemplate
 from django.http import JsonResponse
 from django.db.models import Sum, Count, Q
 from django.core.paginator import Paginator
@@ -99,6 +99,41 @@ def business_restore(request, trash_pk):
 		messages.success(request, 'Business restored.')
 	else:
 		messages.error(request, 'Failed to restore business.')
+	return redirect('business_trash_list')
+
+
+@login_required
+def business_cancel_restore(request, business_pk):
+	"""Cancel a recent restore: move the BusinessProfile back to trash.
+	This creates a BusinessProfileTrash entry from the current BusinessProfile
+	and soft-deletes the BusinessProfile so the user returns to the trash list.
+	"""
+	try:
+		bp = BusinessProfile.objects.filter(pk=business_pk, user=request.user).first()
+		if not bp:
+			messages.error(request, 'Business profile not found.')
+			return redirect('business_profile_setup')
+		BusinessProfileTrash.objects.create(
+			original_id=bp.pk,
+			user=bp.user,
+			business_name=bp.business_name,
+			logo_name=(bp.logo.name if getattr(bp, 'logo', None) else ''),
+			address=bp.address,
+			city=bp.city,
+			state=bp.state,
+			zip_code=bp.zip_code,
+			country=bp.country,
+			email=bp.email,
+			phone=bp.phone,
+			created_at=getattr(bp, 'created_at', None),
+		)
+		bp.is_deleted = True
+		bp.deleted_at = timezone.now()
+		bp.save(update_fields=['is_deleted', 'deleted_at'])
+		messages.success(request, 'Restore cancelled; item returned to trash.')
+	except Exception:
+		logging.exception('Failed to cancel restore for BusinessProfile %s', business_pk)
+		messages.error(request, 'Failed to cancel restore.')
 	return redirect('business_trash_list')
 def register_view(request):
 	if request.user.is_authenticated:
@@ -350,57 +385,30 @@ def client_edit(request, pk):
 
 @login_required
 def client_delete(request, pk):
-	client = get_object_or_404(Client, pk=pk, user=request.user, is_deleted=False)
-	if request.method == 'POST':
-		# perform soft-delete by moving to ClientTrash
-		moved = _move_client_to_trash(pk, user=request.user)
-		if moved:
+	# soft-delete client by moving to trash
+	try:
+		if _move_client_to_trash(pk, user=request.user):
 			messages.success(request, 'Client moved to trash.')
 		else:
 			messages.error(request, 'Failed to move client to trash.')
-		return redirect('client_list')
-	return render(request, 'invoices/client_confirm_delete.html', {'client': client})
-
-
-@login_required
-def business_cancel_restore(request, business_pk):
-	"""Move a recently-restored BusinessProfile back to trash (undo restore).
-	This is a convenience used by the Cancel button after Restore & Edit.
-	"""
-	try:
-		# respect ownership: require owner matches requesting user
-		bp = BusinessProfile.objects.get(pk=business_pk, user=request.user)
-	except BusinessProfile.DoesNotExist:
-		messages.error(request, 'Business profile not found or not authorized.')
-		return redirect('business_trash_list')
-	try:
-		moved = _move_business_to_trash(business_pk, user=request.user)
-		if moved:
-			messages.success(request, 'Restore cancelled; business moved back to trash.')
-		else:
-			messages.error(request, 'Could not move business back to trash.')
 	except Exception:
-		logging.exception('Failed cancelling restore for business %s', business_pk)
-		messages.error(request, 'Failed cancelling restore.')
-	return redirect('business_trash_list')
+		logging.exception('Error moving client to trash %s', pk)
+		messages.error(request, 'Failed to move client to trash.')
+	return redirect('client_list')
 
 
 @login_required
 def invoice_list(request):
-	# base queryset
-	user_param = request.GET.get('user', '').strip()
-	show_all = request.GET.get('all', '') == '1'
-	# Always scope invoices to the requesting user
+	"""Simple invoice list for the current user with optional search and status filter."""
 	invoices_qs = Invoice.objects.filter(user=request.user, is_deleted=False)
-
-	# search and status filtering
 	q = request.GET.get('q', '').strip()
 	status = request.GET.get('status', '').strip()
+	user_param = request.GET.get('user')
+	show_all = request.GET.get('show_all')
 	if q:
-		invoices_qs = invoices_qs.filter(invoice_number__icontains=q) | invoices_qs.filter(client__name__icontains=q)
+		invoices_qs = invoices_qs.filter(Q(invoice_number__icontains=q) | Q(client__name__icontains=q))
 	if status:
 		invoices_qs = invoices_qs.filter(status=status)
-
 	invoices = invoices_qs.order_by('-created_at')
 	return render(request, 'invoices/invoice_list.html', {'invoices': invoices, 'q': q, 'status': status, 'user_param': user_param, 'show_all': show_all})
 
@@ -634,6 +642,7 @@ def _move_invoice_to_trash(pk, user=None):
 			notes=inv.notes,
 			payment_terms=inv.payment_terms,
 			currency=inv.currency,
+			template_choice=getattr(inv, 'template_choice', '1'),
 			items=items,
 			created_at=getattr(inv, 'created_at', None),
 		)
@@ -672,6 +681,7 @@ def _move_invoice_to_trash(pk, user=None):
 				existing.notes = payload.get('notes')
 				existing.payment_terms = payload.get('payment_terms')
 				existing.currency = payload.get('currency')
+				existing.template_choice = payload.get('template_choice') or '1'
 				existing.items = payload.get('items')
 				existing.created_at = payload.get('created_at')
 				existing.save()
@@ -722,6 +732,7 @@ def _restore_invoice_from_trash(trash_pk):
 			inv.notes = t.notes
 			inv.payment_terms = t.payment_terms
 			inv.currency = t.currency
+			inv.template_choice = getattr(t, 'template_choice', '1')
 			if t.business_logo_name:
 				try:
 					inv.business_logo.name = t.business_logo_name
@@ -768,6 +779,7 @@ def _restore_invoice_from_trash(trash_pk):
 				notes=t.notes,
 				payment_terms=t.payment_terms,
 				currency=t.currency,
+				template_choice=getattr(t, 'template_choice', '1'),
 			)
 			if t.business_logo_name:
 				try:
@@ -1050,6 +1062,7 @@ def invoice_trash_view(request, trash_pk):
 		business_address=t.business_address,
 		business_logo=None,
 		items=t.items or [],
+		template_choice=getattr(t, 'template_choice', '1'),
 	)
 	# build business simple namespace for template
 	business = None
@@ -1064,10 +1077,107 @@ def invoice_trash_view(request, trash_pk):
 
 @login_required
 @xframe_options_exempt
-def invoice_live_preview(request):
-	"""Accept JSON POST with invoice and items and return PDF (if WeasyPrint native libs available) or HTML preview."""
-	if request.method != 'POST':
-		return JsonResponse({'error': 'POST required'}, status=405)
+def invoice_live_preview(request, pk=None):
+	"""Accept JSON POST with invoice and items and return PDF or HTML preview.
+	Also support GET preview for a saved/trashed invoice when `pk` is provided
+	(used by the invoice detail iframe).
+	"""
+	# Small helper to ensure returned response is marked exempt from X-Frame-Options
+	def finalize(resp):
+		try:
+			resp.xframe_options_exempt = True
+		except Exception:
+			pass
+		return resp
+
+	# If a GET request targets a saved invoice preview, render the saved/trashed
+	# invoice as HTML and return it. This consolidates preview rendering into
+	# one endpoint so clients use the same server-rendered HTML.
+	if request.method == 'GET' and pk is not None:
+		# Reuse the same rendering logic previously in invoice_preview_html
+		from types import SimpleNamespace
+		invoice = None
+		trash_snapshot = None
+		try:
+			invoice = get_invoice_or_404_for_user(pk, request.user)
+		except Http404:
+			try:
+				trash_snapshot = InvoiceTrash.objects.filter(original_id=pk, user_id=request.user.id).first()
+				if not trash_snapshot:
+					trash_snapshot = InvoiceTrash.objects.filter(pk=pk, user_id=request.user.id).first()
+			except Exception:
+				trash_snapshot = None
+			if trash_snapshot:
+				class ItemListObj:
+					def __init__(self, items):
+						self._items = items or []
+					def exists(self):
+						return bool(self._items)
+					def all(self):
+						out = []
+						from types import SimpleNamespace
+						for it in self._items:
+							out.append(SimpleNamespace(description=it.get('description',''), quantity=it.get('quantity',0), unit_price=it.get('unit_price',0), line_total=it.get('line_total',0)))
+						return out
+
+				client_obj = None
+				if trash_snapshot.client_id:
+					try:
+						c = Client.objects.filter(pk=trash_snapshot.client_id).first()
+						client_obj = c if c else SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+					except Exception:
+						client_obj = SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+				else:
+					client_obj = SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+
+				invoice = SimpleNamespace(
+					pk=trash_snapshot.original_id or trash_snapshot.pk,
+					invoice_number=trash_snapshot.invoice_number,
+					invoice_date=trash_snapshot.invoice_date,
+					due_date=trash_snapshot.due_date,
+					status=trash_snapshot.status,
+					get_status_display=(trash_snapshot.status or '').capitalize(),
+					tax_rate=trash_snapshot.tax_rate,
+					discount_amount=trash_snapshot.discount_amount,
+					subtotal=trash_snapshot.subtotal,
+					tax_amount=trash_snapshot.tax_amount,
+					total_amount=trash_snapshot.total_amount,
+					notes=trash_snapshot.notes,
+					payment_terms=trash_snapshot.payment_terms,
+					currency=trash_snapshot.currency or 'USD',
+					client=client_obj,
+					client_name=trash_snapshot.client_name,
+					client_email=trash_snapshot.client_email,
+					client_phone=trash_snapshot.client_phone,
+					client_address=trash_snapshot.client_address,
+					items=ItemListObj(trash_snapshot.items or []),
+					created_at=trash_snapshot.created_at,
+					template_choice=getattr(trash_snapshot, 'template_choice', '1'),
+				)
+		# prefer DB-backed template when present
+		tpl_choice = getattr(invoice, 'template_choice', request.GET.get('template') or '1')
+		db_template = None
+		try:
+			db_template = InvoiceTemplate.objects.filter(template_id=tpl_choice).first()
+		except Exception:
+			db_template = None
+
+		context = {'invoice': invoice, 'request': request, 'template_choice': tpl_choice}
+
+		if db_template and db_template.template_layout:
+			from django.template import engines
+			django_engine = engines['django']
+			tmpl = django_engine.from_string(db_template.template_layout)
+			html = tmpl.render(context)
+			return finalize(HttpResponse(html, content_type='text/html'))
+
+		# fallback to filesystem
+		tpl_name = f'invoices/invoice_pdf_template{tpl_choice}.html'
+		try:
+			html = render_to_string(tpl_name, context, request=request)
+			return finalize(HttpResponse(html, content_type='text/html'))
+		except Exception:
+			html = render_to_string('invoices/invoice_pdf_template1.html', context, request=request)
 
 	data = None
 	# Accept JSON requests (primary) or form-encoded POSTs (fallback from hidden form submit)
@@ -1076,7 +1186,7 @@ def invoice_live_preview(request):
 		try:
 			data = json.loads(request.body.decode('utf-8'))
 		except Exception:
-			return JsonResponse({'error': 'Invalid JSON'}, status=400)
+			return finalize(JsonResponse({'error': 'Invalid JSON'}, status=400))
 	else:
 		# build a simple data dict from form-encoded POST fields; supports common field names
 		try:
@@ -1091,15 +1201,17 @@ def invoice_live_preview(request):
 				'payment_terms': pdata.get('payment_terms') or pdata.get('id_payment_terms'),
 				'notes': pdata.get('notes') or pdata.get('id_notes'),
 				'currency': pdata.get('currency') or pdata.get('id_currency') or 'USD',
-				'client': {
-					'name': pdata.get('client_name') or pdata.get('id_client_name') or pdata.get('client') or '',
+							return finalize(HttpResponse(html, content_type='text/html'))
+						else:
+							return finalize(HttpResponse(html, content_type='text/html'))
 					'email': pdata.get('client_email') or pdata.get('id_client_email') or '',
 					'phone': pdata.get('client_phone') or pdata.get('id_client_phone') or '',
 					'address': pdata.get('client_address') or pdata.get('id_client_address') or '',
 				},
-				'business': {
-					'id': pdata.get('business') or pdata.get('business_id') or '',
-					'business_name': pdata.get('business_name') or pdata.get('id_business_name') or pdata.get('business_name') or pdata.get('id_business_name_text') or '',
+							return finalize(HttpResponse(html, content_type='text/html'))
+						except Exception:
+							html = render_to_string('invoices/invoice_pdf_template1.html', context, request=request)
+							return finalize(HttpResponse(html, content_type='text/html'))
 					'email': pdata.get('business_email') or pdata.get('id_business_email') or pdata.get('id_business_email_text') or '',
 					'phone': pdata.get('business_phone') or pdata.get('id_business_phone') or pdata.get('id_business_phone_text') or '',
 					'address': pdata.get('business_address') or pdata.get('id_business_address') or pdata.get('id_business_address_text') or '',
@@ -1258,13 +1370,125 @@ def invoice_live_preview(request):
 
 	html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice_obj, 'business': business}, request=request)
 
+	# Allow selecting a specific visual template for preview via JSON/GET param 'template'
+	tpl = None
+	try:
+		if isinstance(data, dict):
+			tpl = data.get('template')
+	except Exception:
+		tpl = None
+	if not tpl:
+		tpl = request.GET.get('template')
+	# First, if tpl corresponds to a DB-backed template id or name, render its stored layout
+	if tpl:
+		try:
+			# numeric id -> lookup by template_id
+			tmpl = None
+			if str(tpl).isdigit():
+				try:
+					tmpl = InvoiceTemplate.objects.filter(template_id=int(tpl)).first()
+				except Exception:
+					tmpl = None
+			if not tmpl:
+				try:
+					tmpl = InvoiceTemplate.objects.filter(template_name=str(tpl)).first()
+				except Exception:
+					tmpl = None
+			if tmpl:
+				try:
+					from django.template import Template, RequestContext
+					tpl_obj = Template(tmpl.template_layout)
+					ctx = RequestContext(request, {'invoice': invoice_obj, 'business': business})
+					html_string = tpl_obj.render(ctx)
+				except Exception:
+					pass
+			else:
+				# fall back to filesystem templates for legacy numeric choices (1-5)
+				if tpl in ('1', '2', '3', '4', '5'):
+					template_name = f'invoices/invoice_pdf_template{tpl}.html'
+					try:
+						html_string = render_to_string(template_name, {'invoice': invoice_obj, 'business': business}, request=request)
+					except Exception:
+						pass
+		except Exception:
+			# on any error, keep default html_string
+			pass
+
 	# Try to render PDF
+	# If caller explicitly asked for HTML preview (format=html), return the rendered HTML
+	# (Removed debug marker/banner - production preview should not include debug markers)
+	if (request.GET.get('format') or '').lower() == 'html':
+		return finalize(HttpResponse(html_string, content_type='text/html'))
+
+
+@login_required
+def invoice_templates_list(request):
+    """List DB-backed invoice templates for editing."""
+    try:
+        templates = InvoiceTemplate.objects.all().order_by('-is_default', 'created_date')
+    except Exception:
+        templates = []
+    return render(request, 'invoices/templates_list.html', {'templates': templates})
+
+
+
+@login_required
+def invoice_template_edit(request, template_id=None):
+	"""Create or edit an InvoiceTemplate.template_layout.
+	GET: show editor. POST: save changes and redirect to list.
+	"""
+
+	tpl = None
+	if template_id:
+		try:
+			tpl = InvoiceTemplate.objects.filter(template_id=template_id).first()
+		except Exception:
+			tpl = None
+
+	if request.method == 'POST':
+		name = request.POST.get('template_name', '').strip()
+		layout = request.POST.get('template_layout', '')
+		is_default = bool(request.POST.get('is_default'))
+		# Save or create. For creation, use raw INSERT so DB BIGSERIAL assigns template_id.
+		try:
+			if tpl:
+				tpl.template_name = name
+				tpl.template_layout = layout
+				tpl.is_default = is_default
+				tpl.save()
+				messages.success(request, 'Template updated.')
+			else:
+				from django.db import connection
+				created_dt = timezone.now()
+				with connection.cursor() as cur:
+					cur.execute(
+						"""
+						INSERT INTO invoice_templates (template_name, template_layout, is_default, created_date)
+						VALUES (%s, %s, %s, %s) RETURNING template_id
+						""",
+						[name, layout, is_default, created_dt]
+					)
+					row = cur.fetchone()
+					new_id = row[0] if row else None
+					messages.success(request, 'Template created.' if new_id else 'Template created (no id returned).')
+		except Exception as e:
+			messages.error(request, f'Failed to save template: {e}')
+			return redirect('invoice_templates_list')
+
+	return render(request, 'invoices/template_editor.html', {'template': tpl})
+
 	try:
 		from weasyprint import HTML
 	except Exception:
 		# If a PDF download was explicitly requested, still return the HTML but include a helpful status/message.
 		# The client-side will handle non-PDF responses gracefully.
-		return HttpResponse(html_string, content_type='text/html')
+		return finalize(HttpResponse(html_string, content_type='text/html'))
+	try:
+		from weasyprint import HTML
+	except Exception:
+		# If a PDF download was explicitly requested, still return the HTML but include a helpful status/message.
+		# The client-side will handle non-PDF responses gracefully.
+		return finalize(HttpResponse(html_string, content_type='text/html'))
 
 	try:
 		html = HTML(string=html_string, base_url=request.build_absolute_uri('/'))
@@ -1275,9 +1499,9 @@ def invoice_live_preview(request):
 			response['Content-Disposition'] = 'attachment; filename="invoice_preview.pdf"'
 		else:
 			response['Content-Disposition'] = 'inline; filename="invoice_preview.pdf"'
-		return response
-	except Exception:
-		return HttpResponse(html_string, content_type='text/html')
+			return finalize(response)
+		except Exception:
+			return finalize(HttpResponse(html_string, content_type='text/html'))
 
 
 @login_required
@@ -1314,6 +1538,13 @@ def invoice_create(request):
 		if form.is_valid():
 			invoice = form.save(commit=False)
 			invoice.user = request.user
+			# Persist selected template choice if provided
+			tpl = post_data.get('template') or post_data.get('id_template') or post_data.get('template_choice')
+			if tpl:
+				try:
+					invoice.template_choice = str(tpl)
+				except Exception:
+					pass
 
 			# Read any business fields submitted so we can populate the invoice snapshot
 			biz_id = post_data.get('business_id') or post_data.get('business') or ''
@@ -1497,7 +1728,12 @@ def invoice_create(request):
 	# Provide empty invoice and business_initial to keep template lookups safe
 	empty_invoice = Invoice()
 	business_initial = {'id': '', 'name': '', 'email': '', 'phone': '', 'address': '', 'logo_url': ''}
-	return render(request, 'invoices/invoice_form.html', {'form': form, 'formset': formset, 'action': 'Create', 'businesses': businesses, 'business_initial': business_initial, 'invoice': empty_invoice})
+	# provide DB-backed templates for selection (if table exists)
+	try:
+		templates_qs = InvoiceTemplate.objects.all().order_by('-is_default', 'created_date')
+	except Exception:
+		templates_qs = []
+	return render(request, 'invoices/invoice_form.html', {'form': form, 'formset': formset, 'action': 'Create', 'businesses': businesses, 'business_initial': business_initial, 'invoice': empty_invoice, 'invoice_templates': templates_qs})
 
 
 @login_required
@@ -1546,7 +1782,7 @@ def invoice_detail(request, pk):
 	except Exception:
 		business = get_businesses_for_user(request.user).first()
 
-	return render(request, 'invoices/invoice_detail.html', {'invoice': invoice, 'business': business})
+	return render(request, 'invoices/invoice_detail.html', {'invoice': invoice, 'business': business, 'template_choice': getattr(invoice, 'template_choice', getattr(invoice, 'template', '1'))})
 
 
 @login_required
@@ -1882,6 +2118,13 @@ def invoice_edit(request, pk):
 		if form.is_valid() and formset.is_valid():
 			invoice = form.save(commit=False)
 			invoice.user = request.user
+			# Persist selected template choice (edit flow)
+			tpl = post_data.get('template') or post_data.get('id_template') or post_data.get('template_choice')
+			if tpl:
+				try:
+					invoice.template_choice = str(tpl)
+				except Exception:
+					pass
 
 			# update/create BusinessProfile (do not attach to invoice model)
 			biz_id = post_data.get('business_id') or post_data.get('business') or ''
@@ -2015,7 +2258,11 @@ def invoice_edit(request, pk):
 					except Exception:
 						pass
 
-	return render(request, 'invoices/invoice_form.html', {'form': form, 'formset': formset, 'action': 'Edit', 'businesses': businesses, 'business_initial': business_initial, 'invoice': invoice})
+	try:
+		templates_qs = InvoiceTemplate.objects.all().order_by('-is_default', 'created_date')
+	except Exception:
+		templates_qs = []
+	return render(request, 'invoices/invoice_form.html', {'form': form, 'formset': formset, 'action': 'Edit', 'businesses': businesses, 'business_initial': business_initial, 'invoice': invoice, 'invoice_templates': templates_qs})
 
 
 @login_required
@@ -2039,13 +2286,96 @@ def invoice_confirmation(request, pk):
 
 @login_required
 def generate_pdf(request, pk):
-	invoice = get_invoice_or_404_for_user(pk, request.user)
+	# Try to load a live Invoice owned by the user. If it's missing (soft-deleted
+	# or removed) but an archived InvoiceTrash exists, render PDF from the archived snapshot.
+	from types import SimpleNamespace
+	invoice = None
+	trash_snapshot = None
+	try:
+		invoice = get_invoice_or_404_for_user(pk, request.user)
+	except Http404:
+		# look for archived snapshot owned by the requesting user
+		try:
+			trash_snapshot = InvoiceTrash.objects.filter(original_id=pk, user_id=request.user.id).first()
+			if not trash_snapshot:
+				# also allow passing the trash PK directly
+				trash_snapshot = InvoiceTrash.objects.filter(pk=pk, user_id=request.user.id).first()
+		except Exception:
+			trash_snapshot = None
+		if trash_snapshot:
+			# build an invoice-like SimpleNamespace for template rendering
+			class ItemListObj:
+				def __init__(self, items):
+					self._items = items or []
+				def exists(self):
+					return bool(self._items)
+				def all(self):
+					# return list of SimpleNamespace items with expected attributes
+					out = []
+					for it in self._items:
+						out.append(SimpleNamespace(description=it.get('description',''), quantity=it.get('quantity',0), unit_price=it.get('unit_price',0), line_total=it.get('line_total',0)))
+					return out
+
+			client_obj = None
+			if trash_snapshot.client_id:
+				# try to fetch the live client record if it still exists and belongs to user
+				try:
+					c = Client.objects.filter(pk=trash_snapshot.client_id).first()
+					client_obj = c if c else SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+				except Exception:
+					client_obj = SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+			else:
+				client_obj = SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+
+			# build invoice-like namespace
+			invoice = SimpleNamespace(
+				pk=trash_snapshot.original_id or trash_snapshot.pk,
+				invoice_number=trash_snapshot.invoice_number,
+				invoice_date=trash_snapshot.invoice_date,
+				due_date=trash_snapshot.due_date,
+				status=trash_snapshot.status,
+				get_status_display=(trash_snapshot.status or '').capitalize(),
+				tax_rate=trash_snapshot.tax_rate,
+				discount_amount=trash_snapshot.discount_amount,
+				subtotal=trash_snapshot.subtotal,
+				tax_amount=trash_snapshot.tax_amount,
+				total_amount=trash_snapshot.total_amount,
+				notes=trash_snapshot.notes,
+				payment_terms=trash_snapshot.payment_terms,
+				currency=trash_snapshot.currency or 'USD',
+				client=client_obj,
+				client_name=trash_snapshot.client_name,
+				client_email=trash_snapshot.client_email,
+				client_phone=trash_snapshot.client_phone,
+				client_address=trash_snapshot.client_address,
+				items=ItemListObj(trash_snapshot.items or []),
+				created_at=trash_snapshot.created_at,
+			)
+			# build business later below using trash_snapshot.business_* fields
+		else:
+			# re-raise original 404
+			raise
 	# Prefer invoice-level snapshot/logo when present so each invoice's PDF reflects
 	# the selected/uploaded image. Fall back to the user's BusinessProfile otherwise.
-	from types import SimpleNamespace
 	business = None
 	try:
-		if getattr(invoice, 'business_name', None) or getattr(invoice, 'business_logo', None):
+		# If we're rendering from a trash snapshot, prefer the snapshot's business fields
+		if trash_snapshot is not None:
+			biz_logo = None
+			try:
+				if trash_snapshot.business_logo_name:
+					u = request.build_absolute_uri('/media/' + trash_snapshot.business_logo_name)
+					biz_logo = SimpleNamespace(url=u)
+			except Exception:
+				biz_logo = None
+			business = SimpleNamespace(
+				business_name=trash_snapshot.business_name or '',
+				email=trash_snapshot.business_email or '',
+				phone=trash_snapshot.business_phone or '',
+				address=trash_snapshot.business_address or '',
+				logo=biz_logo,
+			)
+		elif getattr(invoice, 'business_name', None) or getattr(invoice, 'business_logo', None):
 			biz_logo = None
 			try:
 				if invoice.business_logo:
@@ -2086,7 +2416,48 @@ def generate_pdf(request, pk):
 		business = get_businesses_for_user(request.user).first()
 
 	# render with request so template tags that rely on request (static, media) resolve correctly
-	html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
+	# Determine template choice: prefer explicit ?template=, else use invoice/trash snapshot saved value
+	template_choice = (request.GET.get('template') or '').strip()
+	if not template_choice:
+		template_choice = getattr(invoice, 'template_choice', None) or (getattr(trash_snapshot, 'template_choice', None) if trash_snapshot is not None else None) or ''
+	# If a DB-backed template exists, render its stored layout
+	if template_choice:
+		try:
+			tmpl = None
+			if str(template_choice).isdigit():
+				try:
+					tmpl = InvoiceTemplate.objects.filter(template_id=int(template_choice)).first()
+				except Exception:
+					tmpl = None
+			if not tmpl:
+				try:
+					tmpl = InvoiceTemplate.objects.filter(template_name=str(template_choice)).first()
+				except Exception:
+					tmpl = None
+			if tmpl:
+				try:
+					from django.template import Template, RequestContext
+					tpl_obj = Template(tmpl.template_layout)
+					ctx = RequestContext(request, {'invoice': invoice, 'business': business})
+					html_string = tpl_obj.render(ctx)
+				except Exception:
+					# fall back to filesystem rendering below
+					html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
+			else:
+				# fall back to filesystem templates for legacy numeric choices (1-5)
+				if template_choice in ('1', '2', '3', '4', '5'):
+					template_name = f'invoices/invoice_pdf_template{template_choice}.html'
+					try:
+						html_string = render_to_string(template_name, {'invoice': invoice, 'business': business}, request=request)
+					except Exception:
+						html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
+				else:
+					html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
+		except Exception:
+			# on error, default to filesystem template
+			html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
+	else:
+		html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
 
 	# Allow forcing a specific backend via ?backend=wkhtmltopdf
 	backend = (request.GET.get('backend') or '').lower()
@@ -2203,6 +2574,134 @@ def generate_pdf(request, pk):
 	diagnostic = '<br/>'.join(messages_html)
 	html_with_diag = f'<div class="alert alert-warning" style="margin:12px;">{diagnostic}</div>' + html_string
 	return HttpResponse(html_with_diag, content_type='text/html')
+
+
+@login_required
+@xframe_options_exempt
+def invoice_preview_html(request, pk):
+	"""Return server-rendered HTML for a saved or trashed invoice using the selected template.
+	This is used by the Invoice Detail view iframe so users always see the PDF template layout.
+	"""
+	# Reuse generate_pdf logic for selecting invoice/trash and template, but always return HTML
+	from types import SimpleNamespace
+	invoice = None
+	trash_snapshot = None
+	try:
+		invoice = get_invoice_or_404_for_user(pk, request.user)
+	except Http404:
+		try:
+			trash_snapshot = InvoiceTrash.objects.filter(original_id=pk, user_id=request.user.id).first()
+			if not trash_snapshot:
+				trash_snapshot = InvoiceTrash.objects.filter(pk=pk, user_id=request.user.id).first()
+		except Exception:
+			trash_snapshot = None
+		if trash_snapshot:
+			class ItemListObj:
+				def __init__(self, items):
+					self._items = items or []
+				def exists(self):
+					return bool(self._items)
+				def all(self):
+					out = []
+					from types import SimpleNamespace
+					for it in self._items:
+						out.append(SimpleNamespace(description=it.get('description',''), quantity=it.get('quantity',0), unit_price=it.get('unit_price',0), line_total=it.get('line_total',0)))
+					return out
+
+			client_obj = None
+			if trash_snapshot.client_id:
+				try:
+					c = Client.objects.filter(pk=trash_snapshot.client_id).first()
+					client_obj = c if c else SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+				except Exception:
+					client_obj = SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+			else:
+				client_obj = SimpleNamespace(name=trash_snapshot.client_name or '', email=trash_snapshot.client_email or '', phone=trash_snapshot.client_phone or '', address=trash_snapshot.client_address or '', street='', city='', state='', zip_code='', country='')
+
+			invoice = SimpleNamespace(
+				pk=trash_snapshot.original_id or trash_snapshot.pk,
+				invoice_number=trash_snapshot.invoice_number,
+				invoice_date=trash_snapshot.invoice_date,
+				due_date=trash_snapshot.due_date,
+				status=trash_snapshot.status,
+				get_status_display=(trash_snapshot.status or '').capitalize(),
+				tax_rate=trash_snapshot.tax_rate,
+				discount_amount=trash_snapshot.discount_amount,
+				subtotal=trash_snapshot.subtotal,
+				tax_amount=trash_snapshot.tax_amount,
+				total_amount=trash_snapshot.total_amount,
+				notes=trash_snapshot.notes,
+				payment_terms=trash_snapshot.payment_terms,
+				currency=trash_snapshot.currency or 'USD',
+				client=client_obj,
+				client_name=trash_snapshot.client_name,
+				client_email=trash_snapshot.client_email,
+				client_phone=trash_snapshot.client_phone,
+				client_address=trash_snapshot.client_address,
+				items=ItemListObj(trash_snapshot.items or []),
+				created_at=trash_snapshot.created_at,
+				template_choice=getattr(trash_snapshot, 'template_choice', '1'),
+			)
+		else:
+			raise
+
+	# build business
+	business = None
+	try:
+		if invoice and getattr(invoice, 'business_name', None):
+			from types import SimpleNamespace as _SN
+			biz_logo = None
+			try:
+				if getattr(invoice, 'business_logo', None):
+					u = invoice.business_logo.url
+					if u and not u.startswith('http') and not u.startswith('data:'):
+						u = request.build_absolute_uri(u)
+					biz_logo = _SN(url=u)
+			except Exception:
+				biz_logo = None
+			business = _SN(business_name=getattr(invoice, 'business_name', ''), email=getattr(invoice, 'business_email', ''), phone=getattr(invoice, 'business_phone', ''), address=getattr(invoice, 'business_address', ''), logo=biz_logo)
+		else:
+			bp = get_businesses_for_user(request.user).first()
+			if bp:
+				from types import SimpleNamespace as _SN
+				try:
+					u = bp.logo.url if getattr(bp, 'logo', None) else None
+					if u and not u.startswith('http') and not u.startswith('data:'):
+						u = request.build_absolute_uri(u)
+					biz_logo = _SN(url=u) if u else None
+				except Exception:
+					biz_logo = None
+				business = _SN(business_name=getattr(bp, 'business_name', ''), email=getattr(bp, 'email', ''), phone=getattr(bp, 'phone', ''), address=getattr(bp, 'address', ''), logo=biz_logo)
+			else:
+				business = None
+	except Exception:
+		business = get_businesses_for_user(request.user).first()
+
+	# reuse generate_pdf template selection logic
+	tpl = (request.GET.get('template') or '') or getattr(invoice, 'template_choice', None) or '1'
+	html_string = render_to_string('invoices/invoice_pdf.html', {'invoice': invoice, 'business': business}, request=request)
+	if tpl:
+		try:
+			tmpl = None
+			if str(tpl).isdigit():
+				tmpl = InvoiceTemplate.objects.filter(template_id=int(tpl)).first()
+			if not tmpl:
+				tmpl = InvoiceTemplate.objects.filter(template_name=str(tpl)).first()
+			if tmpl:
+				from django.template import Template, RequestContext
+				tpl_obj = Template(tmpl.template_layout)
+				ctx = RequestContext(request, {'invoice': invoice, 'business': business})
+				html_string = tpl_obj.render(ctx)
+			else:
+				if tpl in ('1','2','3','4','5'):
+					try:
+						html_string = render_to_string(f'invoices/invoice_pdf_template{tpl}.html', {'invoice': invoice, 'business': business}, request=request)
+					except Exception:
+						pass
+		except Exception:
+			pass
+
+	return HttpResponse(html_string, content_type='text/html')
 	try:
 		html = HTML(string=html_string, base_url=request.build_absolute_uri('/'))
 		pdf = html.write_pdf()

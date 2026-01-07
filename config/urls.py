@@ -45,6 +45,11 @@ urlpatterns = [
     path('pdf-status/', views.pdf_status, name='pdf_status'),
     path('invoices/<int:pk>/email/', views.email_invoice, name='email_invoice'),
     path('invoices/preview/', views.invoice_live_preview, name='invoice_live_preview'),
+    path('invoices/<int:pk>/preview-html/', views.invoice_live_preview, name='invoice_preview_html'),
+    # Template management (superuser)
+    path('invoices/templates/', views.invoice_templates_list, name='invoice_templates_list'),
+    path('invoices/templates/new/', views.invoice_template_edit, name='invoice_template_new'),
+    path('invoices/templates/<int:template_id>/edit/', views.invoice_template_edit, name='invoice_template_edit'),
     path('clients/<int:pk>/json/', views.client_detail_api, name='client_detail_api'),
     path('businesses/<int:pk>/json/', views.business_detail_api, name='business_detail_api'),
     # Superadmin

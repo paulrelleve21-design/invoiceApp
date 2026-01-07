@@ -7,6 +7,7 @@
         
                 <form method="post" id="invoice-form" enctype="multipart/form-data" action="{% if action == 'Create' %}{% url 'invoice_create' %}{% else %}{% if form.instance.pk %}{% url 'invoice_edit' form.instance.pk %}{% else %}{% url 'invoice_create' %}{% endif %}{% endif %}">
                         {% csrf_token %}
+                                <input type="hidden" name="template" id="id_template" value="{{ invoice.template_choice|default:'1' }}" />
                         <style>
                             /* Two-column responsive form used inside Invoice Details */
                             .two-col-form .mb-3 { width:100%; box-sizing: border-box; }
@@ -284,11 +285,47 @@
     <div class="col-md-3">
         <div class="card mb-3">
                 <div class="card-body">
-                    <h5>Live Preview</h5>
+                    <h5>Live Previews</h5>
+                    <!-- Template selector moved into the preview block to avoid overlap -->
                     <div id="invoice-preview">
-                        <div class="d-flex justify-content-between">
-                            <strong id="preview-inv-number">{{ form.invoice_number.value|default:'' }}</strong>
-                            <small id="preview-timestamp" class="text-muted"></small>
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <strong id="preview-inv-number">{{ form.invoice_number.value|default:'' }}</strong>
+                                <div><small id="preview-timestamp" class="text-muted"></small></div>
+                            </div>
+                            <div id="template-selector" style="display:flex; gap:6px; align-items:center;">
+                                {% if invoice_templates %}
+                                    {% for tpl in invoice_templates %}
+                                        <button type="button" class="btn btn-sm btn-outline-secondary template-btn" data-template="{{ tpl.template_id }}">{{ tpl.template_name }}</button>
+                                    {% endfor %}
+                                {% else %}
+                                    <button type="button" class="btn btn-sm btn-outline-primary template-btn" data-template="1">Template 1</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary template-btn" data-template="2">Template 2</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary template-btn" data-template="3">Template 3</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary template-btn" data-template="4">Template 4</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary template-btn" data-template="5">Template 5</button>
+                                {% endif %}
+
+                                <!-- Templates dropdown button (keeps sidebar style) -->
+                                <div class="btn-group ms-2">
+                                    <button id="templates-dropdown-toggle" type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Select invoice template">Templates</button>
+                                    <ul class="dropdown-menu dropdown-menu-end" id="templates-dropdown-menu">
+                                        {% if invoice_templates %}
+                                            {% for tpl in invoice_templates %}
+                                                <li><a class="dropdown-item template-dropdown-item" href="#" data-template="{{ tpl.template_id }}">{{ tpl.template_name }}</a></li>
+                                            {% endfor %}
+                                        {% else %}
+                                            <li><a class="dropdown-item template-dropdown-item" href="#" data-template="1">Template 1</a></li>
+                                            <li><a class="dropdown-item template-dropdown-item" href="#" data-template="2">Template 2</a></li>
+                                            <li><a class="dropdown-item template-dropdown-item" href="#" data-template="3">Template 3</a></li>
+                                            <li><a class="dropdown-item template-dropdown-item" href="#" data-template="4">Template 4</a></li>
+                                            <li><a class="dropdown-item template-dropdown-item" href="#" data-template="5">Template 5</a></li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
+
+                                <button type="button" id="toggle-right-preview-btn" class="btn btn-sm btn-outline-primary ms-2" title="Open live preview">Preview</button>
+                            </div>
                         </div>
                         <div class="mt-2 d-flex align-items-center">
                             <img id="preview-business-logo" src="" alt="Business logo preview" style="max-width:140px; max-height:80px; display:none; border-radius:4px; margin-right:12px;" />
@@ -304,6 +341,8 @@
                             <div>Discount: <span id="preview-discount">$0.00</span></div>
                             <div><strong>Total: <span id="preview-total">$0.00</span></strong></div>
                         </div>
+                        <div id="invoice-preview-mini"></div>
+                        <iframe id="invoice-preview-iframe" sandbox="allow-scripts" style="width:100%; height:360px; border:1px solid #e6e6e6; display:none; transform-origin:0 0;" ></iframe>
                     </div>
                 </div>
         </div>
@@ -322,6 +361,26 @@
                         <a href="{% url 'business_profile_setup' %}" class="btn btn-sm btn-outline-primary w-100 mb-2">
                             <i class="fas fa-briefcase me-2"></i>Edit Business Profile
                         </a>
+                        <!-- Prominent Templates button for visibility on all pages -->
+                        <div class="dropdown d-grid">
+                            <button id="quick-templates-btn" type="button" class="btn btn-primary btn-sm mt-2" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">
+                                <i class="fas fa-th-large me-2"></i>Templates
+                            </button>
+                            <!-- dropdown menu for quick button; items mirrored from sidebar dropdown -->
+                            <ul class="dropdown-menu" id="quick-templates-dropdown" style="min-width:200px;">
+                            {% if invoice_templates %}
+                                {% for tpl in invoice_templates %}
+                                    <li><a class="dropdown-item template-dropdown-item" href="#" data-template="{{ tpl.template_id }}">{{ tpl.template_name }}</a></li>
+                                {% endfor %}
+                            {% else %}
+                                <li><a class="dropdown-item template-dropdown-item" href="#" data-template="1">Template 1</a></li>
+                                <li><a class="dropdown-item template-dropdown-item" href="#" data-template="2">Template 2</a></li>
+                                <li><a class="dropdown-item template-dropdown-item" href="#" data-template="3">Template 3</a></li>
+                                <li><a class="dropdown-item template-dropdown-item" href="#" data-template="4">Template 4</a></li>
+                                <li><a class="dropdown-item template-dropdown-item" href="#" data-template="5">Template 5</a></li>
+                            {% endif %}
+                            </ul>
+                        </div>
             </div>
         </div>
     </div>
@@ -365,6 +424,8 @@
 
     // Expose page action globally so preview/download handlers can read it
     window.PAGE_ACTION = "{{ action|escapejs }}";
+    // Expose current invoice PK (empty for Create page)
+    window.INVOICE_PK = "{{ invoice.pk|default:'' }}";
     // URL to redirect to after successful download
     window.INVOICE_LIST_URL = "{% url 'invoice_list' %}";
 
@@ -465,6 +526,7 @@
     // Ensure item inputs are wired (add classes, listeners) so totals update correctly
     try { wireItemInputs(); } catch(e) { console.warn('wireItemInputs failed', e); }
     calculateTotals();
+        try { updateSidebarPreview(); } catch(e) {}
         // populate client/address preview on load (edit case)
         try {
             const clientSelect = document.getElementById('id_client');
@@ -479,6 +541,84 @@
 
         // Page action (Create vs Edit) from server
         const PAGE_ACTION = "{{ action|escapejs }}";
+
+        // Template selection: default to server-provided value or 1
+        window.SELECTED_TEMPLATE = "{{ invoice.template_choice|default:'1' }}" || '1';
+        try {
+            const tplBtns = document.querySelectorAll('.template-btn');
+            tplBtns.forEach(b => {
+                b.addEventListener('click', function(){
+                    window.SELECTED_TEMPLATE = this.dataset.template || '1';
+                    try { applySidebarTemplateStyle(window.SELECTED_TEMPLATE); } catch(e) {}
+                    // update active styles
+                    tplBtns.forEach(x => x.classList.remove('btn-primary'));
+                    tplBtns.forEach(x => x.classList.add('btn-outline-secondary'));
+                    this.classList.remove('btn-outline-secondary');
+                    this.classList.add('btn-primary');
+                    // update hidden form value
+                    try { document.getElementById('id_template').value = window.SELECTED_TEMPLATE; } catch(e) {}
+                    // trigger immediate preview refresh
+                    try { updateSidebarPreview(); } catch(e) { console.warn('updateSidebarPreview failed', e); }
+                    try { ensureLatestPreviewAndRender(); } catch(e) {}
+                });
+            });
+            // mark the saved template as active (or fallback to first button)
+            const activeBtn = document.querySelector('.template-btn[data-template="' + (window.SELECTED_TEMPLATE || '1') + '"]') || tplBtns[0];
+            if (activeBtn) {
+                tplBtns.forEach(x => x.classList.remove('btn-primary'));
+                tplBtns.forEach(x => x.classList.add('btn-outline-secondary'));
+                activeBtn.classList.remove('btn-outline-secondary');
+                activeBtn.classList.add('btn-primary');
+                try { applySidebarTemplateStyle(window.SELECTED_TEMPLATE); } catch(e) {}
+                try { document.getElementById('id_template').value = window.SELECTED_TEMPLATE; } catch(e) {}
+            }
+        } catch (e) {}
+
+        // Dropdown/template list items should also update the selected template
+        try {
+            const tplDropdownItems = document.querySelectorAll('.template-dropdown-item');
+            tplDropdownItems.forEach(a => {
+                a.addEventListener('click', function(ev){
+                    ev.preventDefault();
+                    const tpl = this.dataset.template || '1';
+                    window.SELECTED_TEMPLATE = tpl;
+                    try { applySidebarTemplateStyle(window.SELECTED_TEMPLATE); } catch(e) {}
+                    try { document.getElementById('id_template').value = tpl; } catch(e) {}
+                    // sync button styles
+                    try {
+                        const btns = document.querySelectorAll('.template-btn');
+                        btns.forEach(x => { x.classList.remove('btn-primary'); x.classList.add('btn-outline-secondary'); });
+                        const active = document.querySelector('.template-btn[data-template="' + tpl + '"]');
+                        if (active) { active.classList.remove('btn-outline-secondary'); active.classList.add('btn-primary'); }
+                    } catch(e) {}
+                    // trigger immediate preview refresh
+                    try { updateSidebarPreview(); } catch(e) { console.warn('updateSidebarPreview failed', e); }
+                    try { ensureLatestPreviewAndRender(); } catch(e) {}
+                    // close any open dropdown toggles (works with Bootstrap toggle buttons)
+                    try {
+                        const dd = this.closest('.dropdown');
+                        if (dd) {
+                            const toggle = dd.querySelector('[data-bs-toggle="dropdown"]');
+                            if (toggle) toggle.click();
+                        }
+                    } catch(e) {}
+                });
+            });
+        } catch(e) {}
+
+        // attach toggle handler for right-preview drawer button
+        try {
+            const toggleBtn = document.getElementById('toggle-right-preview-btn');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', function(ev){
+                    try {
+                        const d = document.getElementById('right-preview-drawer');
+                        if (d && d.classList.contains('open')) { closeRightPreview(); }
+                        else { openRightPreview(); }
+                    } catch(err) { console.warn('toggle-right-preview-btn click failed', err); }
+                });
+            }
+        } catch(e) { /* ignore */ }
 
         // Business photo upload removed from invoice flow; edits should be made
         // via the Business Profile page. No client-side file handling here.
@@ -554,6 +694,7 @@
                 }
             }
 
+            
             // include client snapshot editable fields (override fetched data when present)
             try {
                 const cName = (document.getElementById('id_client_name') || {}).value || '';
@@ -567,6 +708,8 @@
                 if (cAddr) data.client.address = cAddr;
             } catch (e) {}
             data.items = [];
+            // include currently selected template so preview/pdf endpoints apply same style
+            data.template = window.SELECTED_TEMPLATE || '1';
 
             // include business snapshot fields (editable) so preview/pdf reflects current inputs
             try {
@@ -683,17 +826,36 @@
         try {
             const container = document.getElementById('invoice-preview');
             if (!container) return;
+            const tpl = (window.SELECTED_TEMPLATE || (container && container.dataset && container.dataset.template) || '1').toString();
             const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            // Variant styles per template
+            let accent = '#333';
+            let headerWeight = '700';
+            let logoFirst = true;
+            let compact = false;
+            switch(tpl) {
+                case '2': accent = '#0d6efd'; headerWeight = '800'; break;
+                case '3': accent = '#198754'; logoFirst = false; break;
+                case '4': accent = '#6f42c1'; compact = true; break;
+                case '5': accent = '#d63384'; headerWeight = '600'; break;
+                default: break;
+            }
+
             let html = '';
             html += '<div class="d-flex justify-content-between"><div style="width:55%">';
-            if (d.business && d.business.logo) html += '<img src="'+esc(d.business.logo)+'" style="max-width:120px; max-height:60px; display:inline-block; margin-right:8px;" />';
-            html += '<div style="font-weight:600;">'+esc(d.business.business_name || '')+'</div>';
+            if (logoFirst) {
+                if (d.business && d.business.logo) html += '<img src="'+esc(d.business.logo)+'" style="max-width:120px; max-height:60px; display:inline-block; margin-right:8px;" />';
+                html += '<div style="font-weight:' + headerWeight + '; color:' + accent + ';">'+esc(d.business.business_name || '')+'</div>';
+            } else {
+                html += '<div style="font-weight:' + headerWeight + '; color:' + accent + ';">'+esc(d.business.business_name || '')+'</div>';
+                if (d.business && d.business.logo) html += '<img src="'+esc(d.business.logo)+'" style="max-width:120px; max-height:60px; display:inline-block; margin-left:8px; float:right;" />';
+            }
             if (d.business && (d.business.address || d.business.email || d.business.phone)) {
                 html += '<div style="font-size:12px;color:#666">'+esc(d.business.address || '') + (d.business.email ? '<br/>'+esc(d.business.email) : '') + (d.business.phone ? '<br/>'+esc(d.business.phone) : '') +'</div>';
             }
             html += '</div>';
             html += '<div style="text-align:right; width:40%">';
-            html += '<div style="font-weight:700; font-size:1.05rem">INVOICE</div>';
+            html += '<div style="font-weight:' + headerWeight + '; font-size:' + (compact ? '0.98rem' : '1.05rem') + '; color:' + accent + '">INVOICE</div>';
             html += '<div style="font-size:12px">Invoice #: <span class="preview-invoice-number">'+esc(d.invoice_number)+'</span></div>';
             html += '<div style="font-size:12px">Date: '+esc(d.invoice_date)+'</div>';
             html += '<div style="font-size:12px">Due: '+esc(d.due_date)+'</div>';
@@ -908,6 +1070,8 @@
     async function downloadPdfFromData(data) {
         const csrftoken = getCsrf();
         console.log('downloadPdfFromData: posting preview data to server');
+        // ensure template is present
+        if (!data.template) data.template = window.SELECTED_TEMPLATE || '1';
         try {
             const resp = await fetch('{% url "invoice_live_preview" %}?format=pdf', {
                 method: 'POST',
@@ -999,7 +1163,7 @@
                 }
             }
             // After saving, request the canonical PDF using wkhtmltopdf and force a download.
-            const url = `/invoices/${pk}/pdf/?format=pdf&backend=wkhtmltopdf`;
+            const url = `/invoices/${pk}/pdf/?format=pdf&backend=wkhtmltopdf&template=${encodeURIComponent(window.SELECTED_TEMPLATE||'1')}`;
             try {
                 const r = await fetch(url, { credentials: 'same-origin' });
                 if (r && r.ok) {
@@ -1021,14 +1185,78 @@
                     }
                 } else {
                     // show server response in modal if available
-                    try { const txt = await r.text(); showPreviewModalWithHtml(txt, _lastPreviewData); } catch(e){ window.open(`/invoices/${pk}/pdf/`, '_blank'); }
+                    try { const txt = await r.text(); showPreviewModalWithHtml(txt, _lastPreviewData); } catch(e){ window.open(`/invoices/${pk}/pdf/?template=${encodeURIComponent(window.SELECTED_TEMPLATE||'1')}`, '_blank'); }
                 }
             } catch (e) {
                 console.warn('submitFormAndOpenPdf: fetch PDF failed, opening in new tab', e);
-                window.open(`/invoices/${pk}/pdf/`, '_blank');
+                window.open(`/invoices/${pk}/pdf/?template=${encodeURIComponent(window.SELECTED_TEMPLATE||'1')}`, '_blank');
             }
         } finally {
             if (btn) btn.disabled = false;
+        }
+    }
+
+    // Fetch server-rendered HTML preview for the selected template and insert into iframe
+    let _sidebarPreviewTimer = null;
+    async function updateSidebarPreview() {
+        try {
+            const iframe = document.getElementById('invoice-preview-iframe');
+            const mini = document.getElementById('invoice-preview-mini');
+            if (!iframe || !mini) return;
+            const data = await serializePreviewData();
+            // ensure template set
+            if (!data.template) data.template = window.SELECTED_TEMPLATE || '1';
+            console.debug('updateSidebarPreview: posting preview for template=', data.template);
+            // add cache-busting to ensure server returns latest rendered template
+            const fetchUrl = '{% url "invoice_live_preview" %}?format=html&template=' + encodeURIComponent(window.SELECTED_TEMPLATE||'1') + '&cb=' + Date.now();
+            const resp = await fetch(fetchUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf(), 'Accept': 'text/html' },
+                body: JSON.stringify(data)
+            });
+            if (!resp.ok) return;
+            const html = await resp.text();
+            // log server-returned HTML tail so we can confirm server-side template marker
+            try { console.debug('updateSidebarPreview: server html tail ->', html.slice(-300)); } catch(e) {}
+            // Ensure base href present so relative asset paths in returned HTML resolve
+            const baseHref = (window.location && window.location.origin) ? (window.location.origin + '/') : '/';
+            let modifiedHtml = html || '';
+            try {
+                if (/<head[^>]*>/i.test(modifiedHtml)) {
+                    modifiedHtml = modifiedHtml.replace(/<head([^>]*)>/i, function(m, g){ return '<head' + (g||'') + '<base href="' + baseHref + '">'; });
+                } else if (/<html[^>]*>/i.test(modifiedHtml)) {
+                    modifiedHtml = modifiedHtml.replace(/<html([^>]*)>/i, function(m,g){ return '<html' + (g||'') + '><head><base href="' + baseHref + '"></head>'; });
+                } else {
+                    modifiedHtml = '<!doctype html><html><head><base href="' + baseHref + '"></head><body>' + modifiedHtml + '</body></html>';
+                }
+            } catch (e) {
+                // ignore replacement errors and fall back to raw html
+            }
+
+            // Use server-returned HTML (no debug comment appended in production)
+            const html_with_comment = modifiedHtml;
+            // Prefer srcdoc (keeps length limits lower and handles base-relative assets when present)
+            try {
+                try { iframe.src = 'about:blank'; } catch(e) {}
+                iframe.srcdoc = html_with_comment;
+                console.debug('updateSidebarPreview: wrote iframe.srcdoc with', comment, 'len=', html_with_comment.length);
+            } catch (e) {
+                // Fallback to data URI if srcdoc isn't supported
+                try {
+                    const dataUri = 'data:text/html;charset=utf-8,' + encodeURIComponent(html_with_comment);
+                    iframe.src = dataUri;
+                    console.debug('updateSidebarPreview: fallback wrote iframe.src (data URI) with', comment);
+                } catch (ee) { console.warn('both srcdoc and data-uri injection failed', ee); }
+            }
+            // show iframe and hide mini textual preview
+            mini.style.display = 'none';
+            iframe.style.display = 'block';
+            // scale down for a compact view (adjust as needed)
+            iframe.style.transform = 'scale(0.65)';
+            iframe.style.height = (360 / 0.65) + 'px';
+            iframe.style.width = '100%';
+        } catch (e) {
+            console.warn('updateSidebarPreview failed', e);
         }
     }
 
@@ -1288,7 +1516,30 @@
     // open printable HTML in a new window so user can Save as PDF via print dialog.
     async function modalDownloadHandler() {
         // Always attempt a fresh serialization/download first so updated photo/fields are used
+        // If this is an existing invoice (Edit), prefer the canonical PDF endpoint first
         try {
+            const pk = window.INVOICE_PK || '';
+            if (pk) {
+                try {
+                    const url = `/invoices/${pk}/pdf/?format=pdf&backend=wkhtmltopdf&template=${encodeURIComponent(window.SELECTED_TEMPLATE||'1')}`;
+                    const r = await fetch(url, { credentials: 'same-origin' });
+                    if (r && r.ok) {
+                        const ct = (r.headers.get('Content-Type') || '').toLowerCase();
+                        if (ct.indexOf('pdf') !== -1) {
+                            const blob = await r.blob();
+                            const filename = (document.getElementById('id_invoice_number') && document.getElementById('id_invoice_number').value) || ('invoice-' + pk);
+                            const blobUrl = URL.createObjectURL(blob);
+                            const a = document.createElement('a'); a.href = blobUrl; a.download = filename + '.pdf'; document.body.appendChild(a); a.click(); a.remove();
+                            setTimeout(()=>{ try{ URL.revokeObjectURL(blobUrl); }catch(e){} },1500);
+                            return;
+                        }
+                        // if non-pdf returned, fall through to preview download handling
+                    }
+                } catch (e) {
+                    console.warn('modalDownloadHandler: canonical PDF fetch failed', e);
+                }
+            }
+
             const fresh = await serializePreviewData();
             const okFresh = await downloadPdfFromData(fresh);
             if (okFresh) return;
@@ -1871,6 +2122,26 @@
     });
 
 // Ensure Invoice Number updates the live preview in real time
+
+    // Apply a simple sidebar template style so the mini preview visually matches selection
+    function applySidebarTemplateStyle(tpl) {
+        try {
+            const root = document.getElementById('invoice-preview');
+            const mini = document.getElementById('invoice-preview-mini');
+            if (!root) return;
+            // remove previous template-* classes
+            Array.from(root.classList).forEach(c => { if (c && c.startsWith('template-')) root.classList.remove(c); });
+            root.classList.add('template-' + tpl);
+            if (mini) {
+                Array.from(mini.classList).forEach(c => { if (c && c.startsWith('template-')) mini.classList.remove(c); });
+                mini.classList.add('template-' + tpl);
+            }
+            // update dataset for reference
+            try { root.dataset.template = tpl; } catch(e) {}
+            // Re-render the compact preview to reflect the new look
+            try { const d = buildPreviewDataSync(); renderMiniPreview(d); } catch(e) { console.warn('applySidebarTemplateStyle render failed', e); }
+        } catch (e) { /* ignore */ }
+    }
 document.addEventListener('DOMContentLoaded', function() {
     const invInput = document.getElementById('id_invoice_number');
     const dateInput = document.getElementById('id_invoice_date');
@@ -1908,6 +2179,80 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // run once on load to ensure sidebar matches any prefilled values
     refreshAllPreviewFields();
+});
+
+// Wire template dropdown and buttons to update the live preview immediately
+document.addEventListener('DOMContentLoaded', function() {
+    // dropdown items inside the new Templates button
+    document.querySelectorAll('.template-dropdown-item').forEach(function(a){
+        a.addEventListener('click', function(e){
+            e.preventDefault();
+            var tpl = this.dataset.template;
+            if (!tpl) return;
+            window.SELECTED_TEMPLATE = tpl;
+            // update hidden form value if present
+            try { document.getElementById('id_template').value = window.SELECTED_TEMPLATE; } catch(e) {}
+            // update inline template button visual state
+            try {
+                const tplBtns = document.querySelectorAll('.template-btn');
+                tplBtns.forEach(function(b){
+                    if (b.dataset.template === tpl) {
+                        b.classList.remove('btn-outline-secondary'); b.classList.add('btn-primary');
+                    } else {
+                        b.classList.remove('btn-primary'); b.classList.add('btn-outline-secondary');
+                    }
+                });
+            } catch(e){}
+            // attempt to close bootstrap dropdown if available
+            try {
+                var dropdownMenu = this.closest('.dropdown-menu');
+                if (dropdownMenu && typeof bootstrap !== 'undefined' && bootstrap.Dropdown) {
+                    var toggle = dropdownMenu.previousElementSibling;
+                    if (toggle) {
+                        var inst = bootstrap.Dropdown.getInstance(toggle);
+                        if (inst && inst.hide) inst.hide();
+                    }
+                }
+            } catch(e){}
+            // trigger preview refresh: schedule server fetch and render
+            try { if (typeof scheduleSidebarUpdate === 'function') scheduleSidebarUpdate(100); } catch(e) {}
+            try { if (document.getElementById('right-preview-drawer') && document.getElementById('right-preview-drawer').classList.contains('open')) { ensureLatestPreviewAndRender(); } } catch(e) {}
+            try { applySidebarTemplateStyle(tpl); } catch(e) {}
+            try { updateSidebarPreview(); } catch(e) { console.warn('updateSidebarPreview failed', e); }
+        });
+    });
+
+    // ensure direct template buttons also set selected template and update preview
+    document.querySelectorAll('.template-btn').forEach(function(b){
+        b.addEventListener('click', function(){
+            var tpl = this.dataset.template;
+            if (!tpl) return;
+            window.SELECTED_TEMPLATE = tpl;
+            try { applySidebarTemplateStyle(tpl); } catch(e) {}
+            document.querySelectorAll('.template-btn').forEach(function(bb){
+                if (bb === b) { bb.classList.remove('btn-outline-secondary'); bb.classList.add('btn-primary'); }
+                else { bb.classList.remove('btn-primary'); bb.classList.add('btn-outline-secondary'); }
+            });
+            // ensure hidden form value updated
+            try { document.getElementById('id_template').value = window.SELECTED_TEMPLATE; } catch(e) {}
+            try { updateSidebarPreview(); } catch(e) { console.warn('updateSidebarPreview failed', e); }
+        });
+    });
+    // Wire the quick Templates button to show its dropdown (Bootstrap) and reuse items
+    try {
+        const quickBtn = document.getElementById('quick-templates-btn');
+        const quickMenu = document.getElementById('quick-templates-dropdown');
+        if (quickBtn && quickMenu) {
+            // initialize Bootstrap dropdown if available
+            if (typeof bootstrap !== 'undefined' && bootstrap.Dropdown) {
+                new bootstrap.Dropdown(quickBtn, {autoClose:true});
+            }
+            // fallback toggle when Bootstrap JS is not present
+            if (typeof bootstrap === 'undefined') {
+                quickBtn.addEventListener('click', function(e){ quickMenu.classList.toggle('show'); });
+            }
+        }
+    } catch(e) { console.warn('quick templates wiring failed', e); }
 });
 </script>
 {% endblock %}

@@ -88,6 +88,8 @@ class Invoice(models.Model):
 	notes = models.TextField(blank=True)
 	payment_terms = models.TextField(blank=True)
 	currency = models.CharField(max_length=8, default='USD')
+	# Template choice for PDF/layout (stores '1','2','3')
+	template_choice = models.CharField(max_length=2, default='1')
 	created_at = models.DateTimeField(auto_now_add=True)
 
 	# Soft-delete support
@@ -202,6 +204,7 @@ class InvoiceTrash(models.Model):
 	notes = models.TextField(blank=True)
 	payment_terms = models.TextField(blank=True)
 	currency = models.CharField(max_length=8, default='USD')
+	template_choice = models.CharField(max_length=2, default='1')
 	items = models.JSONField(null=True, blank=True)
 	created_at = models.DateTimeField(null=True, blank=True)
 	deleted_at = models.DateTimeField(auto_now_add=True)
@@ -226,6 +229,24 @@ class UsersActivityLog(models.Model):
 
 	def __str__(self):
 		return f"{self.activity_type} by {self.user_id} @ {self.timestamp}"
+
+
+class InvoiceTemplate(models.Model):
+	"""Mapping to existing invoice_templates table which stores user-editable templates.
+	Fields: template_id (PK), template_name, template_layout (HTML/text), is_default, created_date
+	"""
+	template_id = models.BigIntegerField(primary_key=True)
+	template_name = models.TextField()
+	template_layout = models.TextField()
+	is_default = models.BooleanField(default=False)
+	created_date = models.DateTimeField(null=True, blank=True)
+
+	class Meta:
+		db_table = 'invoice_templates'
+		managed = False
+
+	def __str__(self):
+		return f"Template {self.template_id}: {self.template_name}"
 
 
 # Signals to keep invoice totals up to date
