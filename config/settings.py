@@ -70,6 +70,18 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.railway.app',
 ]
 
+# Security defaults tuned per-environment
+# In local development keep redirects and secure cookies off to avoid HTTPS issues
+if DEBUG:
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+else:
+    # In production prefer secure cookies and redirect to HTTPS
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
 # Database
 DATABASE_URL = os.getenv('DATABASE_URL')
 if DATABASE_URL:

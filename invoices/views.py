@@ -145,6 +145,14 @@ def login_view(request):
 		messages.error(request, 'Invalid username or password.')
 	else:
 		form = AuthenticationForm(request)
+		# Ensure form widgets have bootstrap-like classes for templates
+		try:
+			if 'username' in form.fields:
+				form.fields['username'].widget.attrs.update({'class': 'form-control'})
+			if 'password' in form.fields:
+				form.fields['password'].widget.attrs.update({'class': 'form-control'})
+		except Exception:
+			pass
 	return render(request, 'registration/login.html', {'form': form})
 
 
@@ -213,6 +221,12 @@ def register_view(request):
 		messages.error(request, 'Please correct the errors below.')
 	else:
 		form = UserCreationForm()
+		# Add form-control classes so templates render nicely without method calls
+		try:
+			for name, f in form.fields.items():
+				f.widget.attrs.update({'class': 'form-control'})
+		except Exception:
+			pass
 	return render(request, 'registration/register.html', {'form': form})
 
 

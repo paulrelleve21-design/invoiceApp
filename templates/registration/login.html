@@ -33,12 +33,12 @@
       {{ form.non_field_errors }}
       <div class="mb-3">
         <label class="form-label muted">{{ form.username.label }}</label>
-        {{ form.username|add_class:'form-control' }}
+        {{ form.username }}
         {{ form.username.errors }}
       </div>
       <div class="mb-3">
         <label class="form-label muted">{{ form.password.label }}</label>
-        {{ form.password|add_class:'form-control' }}
+        {{ form.password }}
         {{ form.password.errors }}
       </div>
 

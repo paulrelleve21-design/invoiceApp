@@ -35,12 +35,12 @@
       {% csrf_token %}
       {{ form.non_field_errors }}
       <div class="row gx-2">
-        {% for field in form %}
+            {% for field in form %}
           <div class="col-12 mb-3">
             {% if field.label %}
               <label class="form-label text-muted">{{ field.label }}</label>
             {% endif %}
-            {{ field|add_class:'form-control' }}
+            {{ field }}
             {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
             {{ field.errors }}
           </div>
